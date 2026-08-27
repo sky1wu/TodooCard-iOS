@@ -50,7 +50,11 @@ SHA-256: 52c109f0d80d7205c62f4619f2e0621e7df0f3d517507f681f4f05d9e567834d
 
 `.github/workflows/build.yml` 会在推送到 `main`、向 `main` 提交 Pull Request，或手动
 触发时运行。工作流使用 GitHub 托管的 macOS runner，先执行核心固定向量校验，再以
-iOS Simulator 为目标执行无签名的完整 `xcodebuild`。真机 BLE 交互仍需人工验收。
+iOS Simulator 为目标执行无签名的完整 `xcodebuild`。成功后可在该次 Actions run 的
+Artifacts 区域下载 `TodooCard-iOS-Simulator`，其中包含打包后的 `TodooCard.app`。
+
+这个产物只能用于 Simulator。可安装到真机的 IPA 需要 Apple Developer 证书、
+Provisioning Profile 和签名配置；真机 BLE 交互仍需人工验收。
 
 ## 目录
 

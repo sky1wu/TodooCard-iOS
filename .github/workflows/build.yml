@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show toolchain versions
         run: |
@@ -45,3 +45,18 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
+      - name: Package simulator app
+        run: |
+          APP_PATH="$RUNNER_TEMP/TodooCardDerivedData/Build/Products/Debug-iphonesimulator/TodooCard.app"
+          test -d "$APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$APP_PATH" \
+            "$RUNNER_TEMP/TodooCard-Simulator.zip"
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v6
+        with:
+          name: TodooCard-iOS-Simulator
+          path: ${{ runner.temp }}/TodooCard-Simulator.zip
+          if-no-files-found: error
+          retention-days: 14
