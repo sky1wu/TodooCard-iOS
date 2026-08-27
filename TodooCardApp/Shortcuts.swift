@@ -100,6 +100,66 @@ struct UpdateTodooCardIntent: AppIntent {
   }
 }
 
+struct SendBingDailyWallpaperIntent: AppIntent {
+  static let title: LocalizedStringResource = "发送 Bing 每日壁纸"
+  static let description = IntentDescription(
+    "获取 Bing 今日的 1080 × 1920 竖屏壁纸，生成卡片内容并自动发送到上次成功使用的 TodooCard。"
+  )
+  static let openAppWhenRun = false
+
+  @Parameter(title: "显示效果", default: .floydSteinberg)
+  var algorithm: ShortcutDitherAlgorithm
+
+  @Parameter(
+    title: "抖动强度",
+    description: "0–150%，默认 100%",
+    default: 100,
+    controlStyle: .field,
+    inclusiveRange: (0, 150)
+  )
+  var strengthPercent: Int
+
+  @Parameter(
+    title: "亮度补偿",
+    description: "-100%–100%，默认 0%",
+    default: 0,
+    controlStyle: .field,
+    inclusiveRange: (-100, 100)
+  )
+  var brightnessPercent: Int
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("获取并发送 Bing 每日壁纸") {
+      \.$algorithm
+      \.$strengthPercent
+      \.$brightnessPercent
+    }
+  }
+
+  func perform() async throws -> some IntentResult {
+    let wallpaper = try await BingDailyWallpaperClient.fetchToday()
+    let configuration = ShortcutImageConfiguration(
+      rotation: 0,
+      focusX: 50,
+      focusY: 50,
+      zoom: 1,
+      algorithm: algorithm.coreValue,
+      strength: Float(strengthPercent) / 100,
+      brightnessCompensation: Float(brightnessPercent) / 100
+    )
+    let payload = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.makePayload(
+        from: wallpaper.data,
+        configuration: configuration
+      )
+    }.value
+
+    let bluetooth = await TodooBluetoothManager.shared
+    try await bluetooth.sendAutomaticallyAndWait(payload)
+    return .result()
+  }
+}
+
 struct TodooCardShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(
@@ -110,6 +170,15 @@ struct TodooCardShortcuts: AppShortcutsProvider {
       ],
       shortTitle: "自动更新卡片",
       systemImageName: "photo"
+    )
+    AppShortcut(
+      intent: SendBingDailyWallpaperIntent(),
+      phrases: [
+        "用 \(.applicationName) 发送 Bing 每日壁纸",
+        "用 \(.applicationName) 更新每日壁纸",
+      ],
+      shortTitle: "发送 Bing 每日壁纸",
+      systemImageName: "globe.asia.australia.fill"
     )
   }
 

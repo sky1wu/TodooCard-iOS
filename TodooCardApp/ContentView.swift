@@ -27,6 +27,7 @@ struct ContentView: View {
   @State private var deviceNameDraft = ""
   @State private var devicePickerPurpose = DevicePickerPurpose.connectAndSend
   @State private var isImporting = false
+  @State private var importStatusText = "正在读取图片"
 
   var body: some View {
     NavigationStack {
@@ -57,15 +58,17 @@ struct ContentView: View {
     }
     .tint(AppTheme.accent)
     .overlay {
-      if isImporting { ImportProgressOverlay() }
+      if isImporting { ImportProgressOverlay(message: importStatusText) }
     }
     .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images)
     .onChange(of: selectedPhoto) { item in
       guard let item else { return }
+      importStatusText = "正在读取照片"
       isImporting = true
       Task { await loadPhoto(item) }
     }
     .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.image]) { result in
+      importStatusText = "正在读取文件"
       isImporting = true
       Task { await importFile(result) }
     }
@@ -176,6 +179,15 @@ struct ContentView: View {
               pasteImage()
             }
           }
+
+          Button(action: beginBingImport) {
+            Label("获取 Bing 每日壁纸", systemImage: "globe.asia.australia.fill")
+              .font(.subheadline.weight(.semibold))
+              .frame(maxWidth: .infinity)
+              .frame(minHeight: 48)
+          }
+          .buttonStyle(OutlinedActionButtonStyle())
+          .accessibilityHint("下载今天的竖屏壁纸并打开卡片预览")
         }
 
         DeviceConnectionCallout(
@@ -233,6 +245,9 @@ struct ContentView: View {
 
   private var importMenu: some View {
     Menu {
+      Button(action: beginBingImport) {
+        Label("Bing 每日壁纸", systemImage: "globe.asia.australia.fill")
+      }
       Button {
         showPhotoPicker = true
       } label: {
@@ -323,11 +338,31 @@ struct ContentView: View {
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 
+  private func beginBingImport() {
+    importStatusText = "正在获取 Bing 每日壁纸"
+    isImporting = true
+    Task { await loadBingWallpaper() }
+  }
+
+  @MainActor
+  private func loadBingWallpaper() async {
+    defer { isImporting = false }
+    do {
+      let wallpaper = try await BingDailyWallpaperClient.fetchToday()
+      editor.loadImage(data: wallpaper.data)
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    } catch {
+      editor.errorMessage = "获取 Bing 每日壁纸失败：\(error.localizedDescription)"
+    }
+  }
+
 }
 
 // MARK: - Home
 
 private struct ImportProgressOverlay: View {
+  let message: String
+
   var body: some View {
     ZStack {
       Color.black.opacity(0.08)
@@ -336,7 +371,7 @@ private struct ImportProgressOverlay: View {
 
       HStack(spacing: 12) {
         ProgressView()
-        Text("正在读取图片")
+        Text(message)
           .font(.subheadline.weight(.semibold))
       }
       .padding(.horizontal, 20)
@@ -346,7 +381,7 @@ private struct ImportProgressOverlay: View {
     }
     .transition(.opacity)
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("正在读取图片")
+    .accessibilityLabel(message)
   }
 }
 
