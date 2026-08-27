@@ -67,6 +67,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var controlRetriedWithoutResponse = false
     private var shouldMaintainConnection = false
     private var reconnectAttempts = 0
+    private var transferConnectionRecoveryAttempts = 0
+    private var reconnectingForTransfer = false
+    private var lastGATTActivityAt: Date?
+
+    private let reusableConnectionIdleLimit: TimeInterval = 10 * 60
 
     private var blockPayloadSize = 0
     private var totalBlocks = 0
@@ -142,6 +147,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isPreparingTransfer = true
         shouldMaintainConnection = true
         reconnectAttempts = 0
+        transferConnectionRecoveryAttempts = 0
+        reconnectingForTransfer = false
 
         if peripheral.state == .connected, activePeripheral?.identifier == peripheral.identifier {
             isConnecting = !isConnected
@@ -167,6 +174,18 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         pendingPayload = payload
         progress = 0
         isPreparingTransfer = true
+        transferConnectionRecoveryAttempts = 0
+        reconnectingForTransfer = false
+        if let lastGATTActivityAt {
+            let idleSeconds = Date().timeIntervalSince(lastGATTActivityAt)
+            if idleSeconds >= reusableConnectionIdleLimit,
+               refreshConnectionForPendingTransfer(
+                reason: "连接已空闲 \(Int(idleSeconds)) 秒，发送前刷新 GATT 链路。",
+                countsAsRecovery: false
+               ) {
+                return
+            }
+        }
         startTransferIfReady()
     }
 
@@ -200,6 +219,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         pendingControlWrite = nil
         handshakeTask?.cancel()
         batteryLevel = nil
+        lastGATTActivityAt = nil
         phase = .idle
         isConnected = false
     }
@@ -215,6 +235,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isConnecting = false
         isPreparingTransfer = false
         isSending = false
+        reconnectingForTransfer = false
+        transferConnectionRecoveryAttempts = 0
         connectedDeviceName = nil
         pendingPayload = nil
     }
@@ -255,6 +277,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         transferID = UUID()
         isConnecting = false
         isPreparingTransfer = false
+        reconnectingForTransfer = false
         isSending = true
         progress = 0
         phase = .waitingBlockSize
@@ -323,6 +346,12 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
                 self.appendLog("控制回复 5 秒未到；按原始发送器流程改用 withoutResponse。")
                 peripheral.writeValue(pending.data, for: characteristic, type: .withoutResponse)
                 self.armControlResponseDeadline(pending, initialType: .withoutResponse)
+                return
+            }
+            if self.refreshConnectionForPendingTransfer(
+                reason: "控制握手无响应，自动重建连接后重试。",
+                countsAsRecovery: true
+            ) {
                 return
             }
             self.fail(pending.timeoutMessage)
@@ -576,6 +605,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         phase = .idle
         isPreparingTransfer = false
         isSending = false
+        reconnectingForTransfer = false
+        transferConnectionRecoveryAttempts = 0
         progress = 1
         pendingPayload = nil
         statusText = "发送成功，连接已保持"
@@ -590,10 +621,13 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
         pendingControlWrite = nil
+        pendingPayload = nil
         phase = .idle
         isSending = false
         isConnecting = false
         isPreparingTransfer = false
+        reconnectingForTransfer = false
+        transferConnectionRecoveryAttempts = 0
         handshakeScheduled = false
         if let unreadyPeripheral {
             shouldMaintainConnection = false
@@ -610,6 +644,44 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         formatter.dateFormat = "HH:mm:ss.SSS"
         logs.append("[\(formatter.string(from: Date()))] \(message)")
         if logs.count > 240 { logs.removeFirst(logs.count - 240) }
+    }
+
+    @discardableResult
+    private func refreshConnectionForPendingTransfer(
+        reason: String,
+        countsAsRecovery: Bool
+    ) -> Bool {
+        guard pendingPayload != nil,
+              shouldMaintainConnection,
+              central.state == .poweredOn,
+              let peripheral = activePeripheral,
+              peripheral.state == .connected else { return false }
+        if countsAsRecovery {
+            guard phase == .waitingBlockSize
+                    || phase == .waitingPayloadLength
+                    || phase == .waitingStart else { return false }
+            guard transferConnectionRecoveryAttempts < 1 else { return false }
+            transferConnectionRecoveryAttempts += 1
+        }
+
+        windowTask?.cancel()
+        deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
+        serviceRefreshTask?.cancel()
+        handshakeTask?.cancel()
+        reconnectTask?.cancel()
+        pendingControlWrite = nil
+        isSending = false
+        isPreparingTransfer = true
+        reconnectingForTransfer = true
+        reconnectAttempts = 0
+        resetConnectionDiscovery()
+        isConnecting = true
+        statusText = "正在恢复连接…"
+        appendLog(reason)
+        appendLog("保留待发送图片；连接恢复后将自动继续。")
+        central.cancelPeripheralConnection(peripheral)
+        return true
     }
 
     private func scheduleReconnect(to peripheral: CBPeripheral, delayNanoseconds: UInt64 = 800_000_000) {
@@ -722,6 +794,7 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral.identifier == activePeripheral?.identifier else { return }
         let wasSending = isSending
+        let wasRecoveringTransfer = reconnectingForTransfer
         windowTask?.cancel()
         deadlineTask?.cancel()
         controlFallbackTask?.cancel()
@@ -735,6 +808,9 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
         }
         appendLog("设备已断开：\(error?.localizedDescription ?? "正常断开")")
         if wasSending { errorMessage = "传输过程中蓝牙连接断开。" }
+        if wasRecoveringTransfer {
+            appendLog("正在为待发送图片恢复有效的 GATT 会话。")
+        }
         if shouldMaintainConnection, central.state == .poweredOn {
             scheduleReconnect(to: peripheral)
         } else {
@@ -831,6 +907,7 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
         controlNotificationsReady = true
         isConnected = true
         isConnecting = false
+        lastGATTActivityAt = Date()
         appendLog("控制通知已订阅。")
         startTransferIfReady()
     }
@@ -841,6 +918,7 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
             guard let value = characteristic.value?.first else { fail("Battery Level 回复为空。"); return }
             batteryLevel = Int(value)
             batteryReadComplete = true
+            lastGATTActivityAt = Date()
             appendLog("安全连接验证成功，电量 \(value)% 。")
             guard !secureCacheRefreshScheduled else { return }
             secureCacheRefreshScheduled = true
@@ -864,16 +942,34 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
             return
         }
         guard characteristic.uuid == controlCharacteristic?.uuid else { return }
-        if let error { fail("控制通知错误：\(error.localizedDescription)"); return }
+        if let error {
+            if refreshConnectionForPendingTransfer(
+                reason: "控制通知错误：\(error.localizedDescription)；自动重建连接。",
+                countsAsRecovery: true
+            ) {
+                return
+            }
+            fail("控制通知错误：\(error.localizedDescription)")
+            return
+        }
         guard let value = characteristic.value else { return }
+        lastGATTActivityAt = Date()
         handleControl(value)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.uuid == controlCharacteristic?.uuid else { return }
         if let error {
+            if refreshConnectionForPendingTransfer(
+                reason: "控制 ATT 写入失败：\(error.localizedDescription)；自动重建连接。",
+                countsAsRecovery: true
+            ) {
+                return
+            }
             fail("写入 \(characteristic.uuid.uuidString) 失败：\(error.localizedDescription)")
             return
         }
+        lastGATTActivityAt = Date()
         appendLog("控制 ATT 写入已确认。")
     }
 }
