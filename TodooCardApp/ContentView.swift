@@ -171,15 +171,6 @@ struct ContentView: View {
           .buttonStyle(FilledActionButtonStyle())
           .accessibilityHint("打开系统照片选择器")
 
-          HStack(spacing: 12) {
-            ImportOptionButton(title: "文件", systemImage: "folder") {
-              showFileImporter = true
-            }
-            ImportOptionButton(title: "粘贴", systemImage: "doc.on.clipboard") {
-              pasteImage()
-            }
-          }
-
           Button(action: beginBingImport) {
             Label("获取 Bing 每日壁纸", systemImage: "globe.asia.australia.fill")
               .font(.subheadline.weight(.semibold))
@@ -490,23 +481,6 @@ private struct ScreenArtwork: View {
       }
     }
     .background(AppTheme.paper)
-  }
-}
-
-private struct ImportOptionButton: View {
-  let title: String
-  let systemImage: String
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      Label(title, systemImage: systemImage)
-        .font(.subheadline.weight(.semibold))
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 48)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(OutlinedActionButtonStyle())
   }
 }
 
