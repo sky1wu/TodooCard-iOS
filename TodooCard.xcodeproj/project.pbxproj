@@ -17,6 +17,7 @@
 		A00000000000000000000008 /* Dithering.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* Dithering.swift */; };
 		A00000000000000000000009 /* PayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* PayloadBuilder.swift */; };
 		A0000000000000000000000A /* TransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* TransferProtocol.swift */; };
+		A0000000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		B0000000000000000000000A /* TransferProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferProtocol.swift; sourceTree = "<group>"; };
 		B0000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0000000000000000000000C /* TodooCard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TodooCard.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +64,7 @@
 				B00000000000000000000003 /* EditorModel.swift */,
 				B00000000000000000000004 /* ImageProcessor.swift */,
 				B00000000000000000000005 /* TodooBluetoothManager.swift */,
+				B0000000000000000000000D /* Assets.xcassets */,
 				B0000000000000000000000B /* Info.plist */,
 			);
 			path = TodooCardApp;
@@ -146,6 +149,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000000000000000000000B /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -215,6 +219,7 @@
 		H00000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
@@ -236,6 +241,7 @@
 		H00000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";

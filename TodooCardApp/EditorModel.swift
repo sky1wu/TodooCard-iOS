@@ -64,6 +64,23 @@ final class EditorModel: ObservableObject {
         scheduleProcessing()
     }
 
+    func clearImage() {
+        processingTask?.cancel()
+        processingTask = nil
+        generation += 1
+        sourceImage = nil
+        previewImage = nil
+        payload = nil
+        payloadSHA256 = "—"
+        isProcessing = false
+        rotation = 0
+        zoom = 1
+        focusX = 50
+        focusY = 50
+        algorithm = .floydSteinberg
+        errorMessage = nil
+    }
+
     func setAlgorithm(_ value: DitherAlgorithm) {
         algorithm = value
         scheduleProcessing()

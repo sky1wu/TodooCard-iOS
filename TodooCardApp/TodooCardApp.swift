@@ -5,8 +5,6 @@ struct TodooCardApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .tint(.blue)
         }
     }
 }
-
