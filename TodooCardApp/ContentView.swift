@@ -200,35 +200,67 @@ struct ContentView: View {
     }
 
     private var sendBar: some View {
-        VStack(spacing: 10) {
-            if bluetooth.isSending {
-                ProgressView(value: bluetooth.progress)
-                Text(bluetooth.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        Button(action: primaryAction) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .fill(sendButtonBackground)
 
-            Button(action: primaryAction) {
-                HStack(spacing: 8) {
-                    if editor.isProcessing || bluetooth.isSending {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: bluetooth.isConnected ? "arrow.up" : "antenna.radiowaves.left.and.right")
+                if bluetooth.isSending {
+                    GeometryReader { proxy in
+                        Rectangle()
+                            .fill(Color.white.opacity(0.2))
+                            .frame(width: proxy.size.width * min(1, max(0, bluetooth.progress)))
                     }
-                    Text(primaryButtonLabel)
+                    .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .animation(.linear(duration: 0.15), value: bluetooth.progress)
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
+
+                HStack(spacing: 11) {
+                    sendButtonIcon
+                        .frame(width: 24, height: 24)
+
+                    Text(primaryButtonLabel)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if bluetooth.isSending {
+                        Text(bluetooth.progress, format: .percent.precision(.fractionLength(0)))
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                    } else if !bluetooth.isBusy && bluetooth.isConnected {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .opacity(0.8)
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!editor.canSend || bluetooth.isSending)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .overlay {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+            }
+            .shadow(
+                color: sendButtonEnabled ? Color.accentColor.opacity(0.28) : .clear,
+                radius: 12,
+                y: 5
+            )
+            .opacity(sendButtonEnabled || bluetooth.isBusy ? 1 : 0.55)
         }
-        .padding(.horizontal, 16)
+        .buttonStyle(.plain)
+        .disabled(!sendButtonEnabled)
+        .accessibilityValue(
+            bluetooth.isSending
+                ? bluetooth.progress.formatted(.percent.precision(.fractionLength(0)))
+                : ""
+        )
+        .padding(.horizontal, 18)
         .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
     }
 
     private var importMenu: some View {
@@ -261,9 +293,38 @@ struct ContentView: View {
     }
 
     private var primaryButtonLabel: String {
-        if bluetooth.isSending { return "发送中" }
+        if bluetooth.isBusy { return bluetooth.statusText }
         if editor.isProcessing { return "正在准备图片" }
         return bluetooth.isConnected ? "发送到 TodooCard" : "连接并发送"
+    }
+
+    @ViewBuilder
+    private var sendButtonIcon: some View {
+        if bluetooth.isBusy || editor.isProcessing {
+            ProgressView()
+                .tint(.white)
+        } else {
+            Image(
+                systemName: bluetooth.isConnected
+                    ? "paperplane.fill"
+                    : "antenna.radiowaves.left.and.right"
+            )
+                .font(.system(size: 17, weight: .semibold))
+        }
+    }
+
+    private var sendButtonEnabled: Bool {
+        editor.canSend && !bluetooth.isBusy
+    }
+
+    private var sendButtonBackground: LinearGradient {
+        let colors: [Color]
+        if sendButtonEnabled || bluetooth.isBusy {
+            colors = [Color(red: 0.12, green: 0.48, blue: 0.98), Color(red: 0.20, green: 0.34, blue: 0.92)]
+        } else {
+            colors = [Color.secondary.opacity(0.7), Color.secondary.opacity(0.55)]
+        }
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private func primaryAction() {
