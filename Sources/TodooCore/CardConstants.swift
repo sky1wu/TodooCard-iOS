@@ -1,8 +1,15 @@
 import Foundation
 
+public enum CardPhysicalSize {
+    public static let widthMillimeters = 62.0
+    public static let heightMillimeters = 97.5
+    public static let aspectRatio = widthMillimeters / heightMillimeters
+}
+
 public enum CardDisplay {
     public static let width = 528
     public static let height = 792
+    public static let aspectRatio = Double(width) / Double(height)
     public static let pixelCount = width * height
     public static let rawByteCount = pixelCount / 2
 }
@@ -93,4 +100,3 @@ public extension Data {
         map { String(format: "%02x", $0) }.joined(separator: " ")
     }
 }
-

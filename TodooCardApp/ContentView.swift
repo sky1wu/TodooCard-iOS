@@ -379,10 +379,12 @@ private struct ImportProgressOverlay: View {
 private struct HomeHeroArtwork: View {
   var body: some View {
     GeometryReader { proxy in
-      let cardHeight = min(proxy.size.height * 0.86, proxy.size.width * 0.48 / 0.62)
-      let cardWidth = cardHeight * 0.62
+      let cardAspectRatio = CGFloat(CardPhysicalSize.aspectRatio)
+      let screenAspectRatio = CGFloat(CardDisplay.aspectRatio)
+      let cardHeight = min(proxy.size.height * 0.86, proxy.size.width * 0.48 / cardAspectRatio)
+      let cardWidth = cardHeight * cardAspectRatio
       let screenWidth = cardWidth * 0.86
-      let screenHeight = screenWidth * 1.5
+      let screenHeight = screenWidth / screenAspectRatio
 
       ZStack {
         RoundedRectangle(cornerRadius: 34, style: .continuous)
@@ -586,10 +588,12 @@ private struct PreviewCanvas: View {
 
   var body: some View {
     GeometryReader { proxy in
-      let cardHeight = min(proxy.size.height * 0.96, proxy.size.width / 0.62)
-      let cardWidth = cardHeight * 0.62
+      let cardAspectRatio = CGFloat(CardPhysicalSize.aspectRatio)
+      let screenAspectRatio = CGFloat(CardDisplay.aspectRatio)
+      let cardHeight = min(proxy.size.height * 0.96, proxy.size.width / cardAspectRatio)
+      let cardWidth = cardHeight * cardAspectRatio
       let screenWidth = cardWidth * 0.86
-      let screenHeight = screenWidth * 1.5
+      let screenHeight = screenWidth / screenAspectRatio
       let screenSize = CGSize(width: screenWidth, height: screenHeight)
       let interactiveZoom = min(4, max(1, editor.zoom * Double(gesture.magnification)))
 
