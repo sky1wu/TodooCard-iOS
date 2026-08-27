@@ -45,18 +45,17 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: Package simulator app
+      - name: Prepare simulator app artifact
         run: |
           APP_PATH="$RUNNER_TEMP/TodooCardDerivedData/Build/Products/Debug-iphonesimulator/TodooCard.app"
           test -d "$APP_PATH"
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$APP_PATH" \
-            "$RUNNER_TEMP/TodooCard-Simulator.zip"
+          mkdir -p "$RUNNER_TEMP/TodooCardArtifact"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/TodooCardArtifact/TodooCard.app"
 
       - name: Upload simulator app
         uses: actions/upload-artifact@v6
         with:
-          name: TodooCard-iOS-Simulator
-          path: ${{ runner.temp }}/TodooCard-Simulator.zip
+          name: TodooCard.app
+          path: ${{ runner.temp }}/TodooCardArtifact
           if-no-files-found: error
           retention-days: 14
