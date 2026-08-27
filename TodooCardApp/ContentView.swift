@@ -384,7 +384,9 @@ private struct HomeHeroArtwork: View {
       let cardHeight = min(proxy.size.height * 0.86, proxy.size.width * 0.48 / cardAspectRatio)
       let cardWidth = cardHeight * cardAspectRatio
       let cardCornerRadius = cardWidth * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
-      let screenWidth = cardWidth * 0.86
+      let screenSideInset = cardWidth * CGFloat(CardPhysicalSize.displaySideInsetToWidthRatio)
+      let screenTopInset = cardHeight * CGFloat(CardPhysicalSize.displayTopInsetToHeightRatio)
+      let screenWidth = cardWidth - screenSideInset * 2
       let screenHeight = screenWidth / screenAspectRatio
 
       ZStack {
@@ -409,6 +411,8 @@ private struct HomeHeroArtwork: View {
                 .stroke(Color.white.opacity(0.72), lineWidth: 1)
             }
 
+          DeviceMatteTexture(cornerRadius: cardCornerRadius)
+
           ScreenArtwork()
             .frame(width: screenWidth, height: screenHeight)
             .clipShape(RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous))
@@ -416,7 +420,7 @@ private struct HomeHeroArtwork: View {
               RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous)
                 .stroke(Color.black.opacity(0.15), lineWidth: 1)
             }
-            .padding(.top, cardHeight * 0.045)
+            .padding(.top, screenTopInset)
         }
         .frame(width: cardWidth, height: cardHeight)
         .shadow(color: AppTheme.shadow, radius: 20, y: 12)
@@ -586,7 +590,9 @@ private struct DeviceConnectionCallout: View {
 private struct PreviewCanvas: View {
   @ObservedObject var editor: EditorModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @GestureState private var gesture = CropGestureState()
+  @GestureState private var cropState = CropGestureState()
+  @GestureState private var deviceDragState = Device3DGestureState()
+  @State private var settledYaw = 0.0
 
   var body: some View {
     GeometryReader { proxy in
@@ -596,114 +602,157 @@ private struct PreviewCanvas: View {
       let cardWidth = cardHeight * cardAspectRatio
       let cardCornerRadius = cardWidth * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
       let cardThickness = cardWidth * CGFloat(CardPhysicalSize.thicknessToWidthRatio)
-      let screenWidth = cardWidth * 0.86
+      let screenSideInset = cardWidth * CGFloat(CardPhysicalSize.displaySideInsetToWidthRatio)
+      let screenTopInset = cardHeight * CGFloat(CardPhysicalSize.displayTopInsetToHeightRatio)
+      let screenWidth = cardWidth - screenSideInset * 2
       let screenHeight = screenWidth / screenAspectRatio
       let screenSize = CGSize(width: screenWidth, height: screenHeight)
-      let interactiveZoom = min(4, max(1, editor.zoom * Double(gesture.magnification)))
-      let tilt = deviceTilt(cardSize: CGSize(width: cardWidth, height: cardHeight))
-      let depthOffset = deviceDepthOffset(thickness: cardThickness, tilt: tilt)
+      let cardSize = CGSize(width: cardWidth, height: cardHeight)
+      let interactiveZoom = min(4, max(1, editor.zoom * Double(cropState.magnification)))
+      let pose = devicePose(cardSize: cardSize)
+      let normalizedYaw = normalizedDegrees(pose.yaw)
+      let showingBack = normalizedYaw > 90 && normalizedYaw < 270
+      let threeDGesture = device3DGesture(in: cardSize)
 
-      ZStack(alignment: .top) {
-        DeviceThicknessLayers(
-          size: CGSize(width: cardWidth, height: cardHeight),
-          cornerRadius: cardCornerRadius,
-          depthOffset: depthOffset
-        )
+      ZStack {
+        Color.clear
+          .contentShape(Rectangle())
+          .simultaneousGesture(threeDGesture)
 
-        ZStack(alignment: .top) {
-          RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-            .fill(AppTheme.deviceShell)
-            .overlay {
-              RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.72), lineWidth: 1)
-            }
+        ZStack {
+          DeviceEdgeSurfaces(
+            size: cardSize,
+            thickness: cardThickness,
+            cornerRadius: cardCornerRadius,
+            pitch: pose.pitch,
+            yaw: pose.yaw
+          )
 
           ZStack {
-            AppTheme.paper
+            ZStack(alignment: .top) {
+              RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .fill(AppTheme.deviceShell)
+                .overlay {
+                  RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.72), lineWidth: 1)
+                }
+                .simultaneousGesture(threeDGesture)
 
-            if let source = editor.sourceImage, gesture.isActive || editor.isProcessing {
-              SourceCropPreview(
-                image: source,
-                rotation: editor.rotation,
-                focusX: editor.focusX,
-                focusY: editor.focusY,
-                zoom: interactiveZoom,
-                translation: gesture.translation
-              )
-            } else if let preview = editor.previewImage {
-              Image(uiImage: preview)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFill()
-            }
+              DeviceMatteTexture(cornerRadius: cardCornerRadius)
 
-            if editor.isProcessing && !gesture.isActive {
-              HStack(spacing: 7) {
-                ProgressView().controlSize(.small)
-                Text("处理中").font(.caption.weight(.semibold))
+              ZStack {
+                AppTheme.paper
+
+                if let source = editor.sourceImage, cropState.isActive || editor.isProcessing {
+                  SourceCropPreview(
+                    image: source,
+                    rotation: editor.rotation,
+                    focusX: editor.focusX,
+                    focusY: editor.focusY,
+                    zoom: interactiveZoom,
+                    translation: cropState.translation
+                  )
+                } else if let preview = editor.previewImage {
+                  Image(uiImage: preview)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                }
+
+                if editor.isProcessing && !cropState.isActive {
+                  HStack(spacing: 7) {
+                    ProgressView().controlSize(.small)
+                    Text("处理中").font(.caption.weight(.semibold))
+                  }
+                  .padding(.horizontal, 10)
+                  .padding(.vertical, 7)
+                  .background(.regularMaterial, in: Capsule())
+                  .padding(10)
+                  .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
               }
-              .padding(.horizontal, 10)
-              .padding(.vertical, 7)
-              .background(.regularMaterial, in: Capsule())
-              .padding(10)
-              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+              .frame(width: screenWidth, height: screenHeight)
+              .clipShape(RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous))
+              .overlay {
+                RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous)
+                  .stroke(Color.black.opacity(0.17), lineWidth: 1)
+              }
+              .padding(.top, screenTopInset)
+              .contentShape(Rectangle())
+              .gesture(cropGesture(in: screenSize))
+
+              DeviceLightOverlay(
+                cornerRadius: cardCornerRadius,
+                pitch: pose.pitch,
+                yaw: pose.yaw
+              )
             }
+            .frame(width: cardWidth, height: cardHeight)
+            .opacity(showingBack ? 0 : 1)
+            .allowsHitTesting(!showingBack)
+
+            ZStack {
+              DeviceBackFace(size: cardSize, cornerRadius: cardCornerRadius)
+              DeviceLightOverlay(
+                cornerRadius: cardCornerRadius,
+                pitch: pose.pitch,
+                yaw: pose.yaw
+              )
+            }
+            .frame(width: cardWidth, height: cardHeight)
+            .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+            .simultaneousGesture(threeDGesture)
+            .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+            .opacity(showingBack ? 1 : 0)
+            .allowsHitTesting(showingBack)
           }
-          .frame(width: screenWidth, height: screenHeight)
-          .clipShape(RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous))
-          .overlay {
-            RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous)
-              .stroke(Color.black.opacity(0.17), lineWidth: 1)
-          }
-          .padding(.top, cardHeight * 0.045)
-          .contentShape(Rectangle())
-          .gesture(cropGesture(in: screenSize))
+          .frame(width: cardWidth, height: cardHeight)
+          .rotation3DEffect(
+            .degrees(pose.pitch),
+            axis: (x: 1, y: 0, z: 0),
+            perspective: 0.72
+          )
+          .rotation3DEffect(
+            .degrees(pose.yaw),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.72
+          )
         }
         .frame(width: cardWidth, height: cardHeight)
-      }
-      .frame(width: cardWidth, height: cardHeight)
-      .rotation3DEffect(
-        .degrees(tilt.pitch),
-        axis: (x: 1, y: 0, z: 0),
-        perspective: 0.72
-      )
-      .rotation3DEffect(
-        .degrees(tilt.yaw),
-        axis: (x: 0, y: 1, z: 0),
-        perspective: 0.72
-      )
-      .shadow(
-        color: AppTheme.shadow,
-        radius: gesture.isActive ? 27 : 22,
-        x: -depthOffset.width * 1.8,
-        y: 12 - depthOffset.height * 1.4
-      )
-      .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-      .animation(
-        reduceMotion || gesture.isActive
-          ? nil
-          : .spring(response: 0.42, dampingFraction: 0.78),
-        value: gesture.isActive
-      )
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel("TodooCard 六色屏幕预览")
-      .accessibilityHint("拖动调整位置并查看机身立体效果，双指缩放")
-      .accessibilityValue(String(format: "缩放 %.1f 倍", editor.zoom))
-      .accessibilityAdjustableAction { direction in
-        switch direction {
-        case .increment: editor.setZoom(editor.zoom * 1.25)
-        case .decrement: editor.setZoom(editor.zoom / 1.25)
-        @unknown default: break
+        .shadow(
+          color: AppTheme.shadow,
+          radius: deviceDragState.isActive ? 28 : 22,
+          x: shadowOffset(for: pose).width,
+          y: 12 + shadowOffset(for: pose).height
+        )
+        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        .animation(
+          reduceMotion || deviceDragState.isActive
+            ? nil
+            : .spring(response: 0.44, dampingFraction: 0.8),
+          value: deviceDragState.isActive
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("TodooCard 六色屏幕预览")
+        .accessibilityHint("屏幕内拖动调整图片，屏幕外拖动旋转设备，双指缩放")
+        .accessibilityValue(String(format: "缩放 %.1f 倍", editor.zoom))
+        .accessibilityAdjustableAction { direction in
+          switch direction {
+          case .increment: editor.setZoom(editor.zoom * 1.25)
+          case .decrement: editor.setZoom(editor.zoom / 1.25)
+          @unknown default: break
+          }
         }
+        .accessibilityAction(named: "还原构图") { editor.resetFraming() }
+        .accessibilityAction(named: "翻转设备") { flipDevice() }
       }
-      .accessibilityAction(named: "还原构图") { editor.resetFraming() }
     }
   }
 
   private func cropGesture(in viewport: CGSize) -> some Gesture {
     DragGesture(minimumDistance: 0)
       .simultaneously(with: MagnificationGesture())
-      .updating($gesture) { value, state, _ in
+      .updating($cropState) { value, state, _ in
         state.isActive = true
         state.translation = value.first?.translation ?? .zero
         state.magnification = value.second ?? 1
@@ -717,58 +766,215 @@ private struct PreviewCanvas: View {
       }
   }
 
-  private func deviceTilt(cardSize: CGSize) -> (pitch: Double, yaw: Double) {
-    guard gesture.isActive, !reduceMotion, cardSize.width > 0, cardSize.height > 0 else {
-      return (0, 0)
-    }
-    let horizontal = min(1, max(-1, gesture.translation.width / (cardSize.width * 0.35)))
-    let vertical = min(1, max(-1, gesture.translation.height / (cardSize.height * 0.35)))
-    return (pitch: Double(-vertical * 12), yaw: Double(horizontal * 14))
+  private func device3DGesture(in cardSize: CGSize) -> some Gesture {
+    DragGesture(minimumDistance: 3)
+      .updating($deviceDragState) { value, state, _ in
+        state.isActive = true
+        state.translation = value.translation
+      }
+      .onEnded { value in
+        guard cardSize.width > 0 else { return }
+        let actual = value.translation.width
+        let predicted = value.predictedEndTranslation.width
+        let projected = abs(predicted) > abs(actual) ? predicted : actual
+        let delta = min(180, max(-180, Double(projected / cardSize.width) * 180))
+        let target = ((settledYaw + delta) / 180).rounded() * 180
+        if reduceMotion {
+          settledYaw = target
+        } else {
+          withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) {
+            settledYaw = target
+          }
+        }
+      }
   }
 
-  private func deviceDepthOffset(
-    thickness: CGFloat,
-    tilt: (pitch: Double, yaw: Double)
-  ) -> CGSize {
-    let pitch = tilt.pitch * .pi / 180
-    let yaw = tilt.yaw * .pi / 180
+  private func devicePose(cardSize: CGSize) -> (pitch: Double, yaw: Double) {
+    guard deviceDragState.isActive, !reduceMotion, cardSize.width > 0, cardSize.height > 0 else {
+      return (0, settledYaw)
+    }
+    let yawDelta = min(
+      180,
+      max(-180, Double(deviceDragState.translation.width / cardSize.width) * 180)
+    )
+    let vertical = min(
+      1,
+      max(-1, deviceDragState.translation.height / (cardSize.height * 0.36))
+    )
+    return (pitch: Double(-vertical * 11), yaw: settledYaw + yawDelta)
+  }
+
+  private func normalizedDegrees(_ degrees: Double) -> Double {
+    let result = degrees.truncatingRemainder(dividingBy: 360)
+    return result >= 0 ? result : result + 360
+  }
+
+  private func shadowOffset(for pose: (pitch: Double, yaw: Double)) -> CGSize {
+    let yaw = sin(pose.yaw * .pi / 180)
+    let pitch = sin(pose.pitch * .pi / 180)
     return CGSize(
-      width: -CGFloat(sin(yaw)) * thickness,
-      height: CGFloat(sin(pitch)) * thickness
+      width: CGFloat(-yaw * 10),
+      height: CGFloat(pitch * 6)
+    )
+  }
+
+  private func flipDevice() {
+    if reduceMotion {
+      settledYaw += 180
+    } else {
+      withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) {
+        settledYaw += 180
+      }
+    }
+  }
+}
+
+private struct DeviceEdgeSurfaces: View {
+  let size: CGSize
+  let thickness: CGFloat
+  let cornerRadius: CGFloat
+  let pitch: Double
+  let yaw: Double
+
+  var body: some View {
+    let pitchRadians = pitch * .pi / 180
+    let yawRadians = yaw * .pi / 180
+    let horizontalDepth = abs(CGFloat(sin(yawRadians))) * thickness
+    let verticalDepth = abs(CGFloat(sin(pitchRadians))) * thickness
+    let projectedWidth = abs(CGFloat(cos(yawRadians))) * size.width
+    let projectedHeight = abs(CGFloat(cos(pitchRadians))) * size.height
+
+    ZStack {
+      if horizontalDepth > 0.1 {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+          .fill(edgeGradient)
+          .frame(width: max(1, horizontalDepth), height: projectedHeight)
+          .offset(
+            x: (sin(yawRadians) >= 0 ? -1 : 1)
+              * (projectedWidth / 2 + horizontalDepth / 2)
+          )
+      }
+
+      if verticalDepth > 0.1 {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+          .fill(edgeGradient)
+          .frame(width: projectedWidth, height: max(1, verticalDepth))
+          .offset(
+            y: (sin(pitchRadians) >= 0 ? 1 : -1)
+              * (projectedHeight / 2 + verticalDepth / 2)
+          )
+      }
+    }
+    .frame(width: size.width, height: size.height)
+    .allowsHitTesting(false)
+  }
+
+  private var edgeGradient: LinearGradient {
+    LinearGradient(
+      colors: [
+        AppTheme.deviceEdgeHighlight,
+        AppTheme.deviceEdge,
+        AppTheme.deviceEdgeShadow,
+      ],
+      startPoint: .topLeading,
+      endPoint: .bottomTrailing
     )
   }
 }
 
-private struct DeviceThicknessLayers: View {
+private struct DeviceBackFace: View {
   let size: CGSize
   let cornerRadius: CGFloat
-  let depthOffset: CGSize
-  private let layerCount = 10
 
   var body: some View {
     ZStack {
-      ForEach((1 ... layerCount).reversed(), id: \.self) { layer in
-        let progress = CGFloat(layer) / CGFloat(layerCount)
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .fill(
-            LinearGradient(
-              colors: [
-                AppTheme.deviceEdgeHighlight,
-                AppTheme.deviceEdge,
-                AppTheme.deviceEdgeShadow,
-              ],
-              startPoint: .topLeading,
-              endPoint: .bottomTrailing
-            )
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .fill(AppTheme.deviceShell)
+        .overlay {
+          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(Color.white.opacity(0.64), lineWidth: 1)
+        }
+
+      DeviceMatteTexture(cornerRadius: cornerRadius)
+
+      VStack(spacing: size.width * 0.035) {
+        Image(systemName: "rectangle.portrait")
+          .font(.system(size: size.width * 0.11, weight: .light))
+        Text("TodooCard")
+          .font(.system(size: size.width * 0.065, weight: .semibold, design: .rounded))
+      }
+      .foregroundStyle(AppTheme.deviceEdge.opacity(0.46))
+    }
+    .frame(width: size.width, height: size.height)
+  }
+}
+
+private struct DeviceMatteTexture: View {
+  let cornerRadius: CGFloat
+
+  var body: some View {
+    Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: true) { context, size in
+      let spacing = max(3, size.width / 38)
+      let grain = max(0.45, size.width / 420)
+      let columns = max(1, Int(ceil(size.width / spacing)))
+      let rows = max(1, Int(ceil(size.height / spacing)))
+
+      for row in 0 ... rows {
+        for column in 0 ... columns {
+          let seed = (row * 73_856_093) ^ (column * 19_349_663)
+          let jitterX = CGFloat(seed % 101) / 100 - 0.5
+          let jitterY = CGFloat((seed / 101) % 103) / 102 - 0.5
+          let diameter = grain * (0.72 + CGFloat((seed / 10_403) % 7) * 0.06)
+          let origin = CGPoint(
+            x: CGFloat(column) * spacing + spacing / 2 + jitterX * spacing * 0.52,
+            y: CGFloat(row) * spacing + spacing / 2 + jitterY * spacing * 0.52
           )
-          .frame(width: size.width, height: size.height)
-          .offset(
-            x: depthOffset.width * progress,
-            y: depthOffset.height * progress
+          let rect = CGRect(
+            x: origin.x - diameter / 2,
+            y: origin.y - diameter / 2,
+            width: diameter,
+            height: diameter
           )
+          let color = seed.isMultiple(of: 3)
+            ? Color.white.opacity(0.085)
+            : Color.black.opacity(0.045)
+          context.fill(Path(ellipseIn: rect), with: .color(color))
+        }
       }
     }
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .blendMode(.softLight)
+    .opacity(0.78)
     .allowsHitTesting(false)
+  }
+}
+
+private struct DeviceLightOverlay: View {
+  let cornerRadius: CGFloat
+  let pitch: Double
+  let yaw: Double
+
+  var body: some View {
+    let yawLight = sin(yaw * .pi / 180)
+    let pitchLight = sin(pitch * .pi / 180)
+    let intensity = min(1, abs(yawLight) * 0.82 + abs(pitchLight) * 0.48)
+    let startsLeading = yawLight >= 0
+
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      .fill(
+        LinearGradient(
+          colors: [
+            Color.white.opacity(0.2),
+            Color.clear,
+            Color.black.opacity(0.12),
+          ],
+          startPoint: startsLeading ? .leading : .trailing,
+          endPoint: startsLeading ? .trailing : .leading
+        )
+      )
+      .opacity(intensity)
+      .blendMode(.softLight)
+      .allowsHitTesting(false)
   }
 }
 
@@ -776,6 +982,11 @@ private struct CropGestureState {
   var isActive = false
   var translation = CGSize.zero
   var magnification: CGFloat = 1
+}
+
+private struct Device3DGestureState {
+  var isActive = false
+  var translation = CGSize.zero
 }
 
 private struct SourceCropPreview: View {
@@ -926,7 +1137,7 @@ private struct EditorControlPanel: View {
           }
         }
 
-        Text("拖动画面可定位并查看机身立体效果，也可以用双指缩放。")
+        Text("画面内拖动可定位；在机身边框或空白区域左右滑动可翻转设备。")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -1458,19 +1669,25 @@ private struct MiniCardDeviceIcon: View {
   var body: some View {
     let height = width / CGFloat(CardPhysicalSize.aspectRatio)
     let cornerRadius = width * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
+    let screenSideInset = width * CGFloat(CardPhysicalSize.displaySideInsetToWidthRatio)
+    let screenTopInset = height * CGFloat(CardPhysicalSize.displayTopInsetToHeightRatio)
+    let screenWidth = width - screenSideInset * 2
+    let screenHeight = screenWidth / CGFloat(CardDisplay.aspectRatio)
 
     ZStack(alignment: .top) {
       RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         .fill(AppTheme.deviceShell)
 
+      DeviceMatteTexture(cornerRadius: cornerRadius)
+
       ScreenArtwork()
-        .frame(width: 32, height: 48)
+        .frame(width: screenWidth, height: screenHeight)
         .clipShape(RoundedRectangle(cornerRadius: 2.2, style: .continuous))
         .overlay {
           RoundedRectangle(cornerRadius: 2.2, style: .continuous)
             .stroke(Color.black.opacity(0.18), lineWidth: 0.5)
         }
-        .padding(.top, 4.2)
+        .padding(.top, screenTopInset)
     }
     .frame(width: width, height: height)
     .overlay {

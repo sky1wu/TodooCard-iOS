@@ -19,6 +19,8 @@ func runChecks() throws {
     try check(CardPhysicalSize.heightMillimeters == 97.5, "physical card height")
     try check(CardPhysicalSize.thicknessMillimeters == 3, "physical card thickness")
     try check(CardPhysicalSize.cornerRadiusMillimeters == 5.5, "physical card corner radius")
+    try check(CardPhysicalSize.displaySideInsetMillimeters == 5, "physical display side inset")
+    try check(CardPhysicalSize.displayTopInsetMillimeters == 5.5, "physical display top inset")
     try check(abs(CardPhysicalSize.aspectRatio - 124.0 / 195.0) < 0.000_001, "physical card aspect ratio")
     try check(
         abs(CardPhysicalSize.thicknessToWidthRatio - 3.0 / 62.0) < 0.000_001,
@@ -27,6 +29,14 @@ func runChecks() throws {
     try check(
         abs(CardPhysicalSize.cornerRadiusToWidthRatio - 11.0 / 124.0) < 0.000_001,
         "physical card corner radius ratio"
+    )
+    try check(
+        abs(CardPhysicalSize.displaySideInsetToWidthRatio - 5.0 / 62.0) < 0.000_001,
+        "physical display side inset ratio"
+    )
+    try check(
+        abs(CardPhysicalSize.displayTopInsetToHeightRatio - 11.0 / 195.0) < 0.000_001,
+        "physical display top inset ratio"
     )
     try check(abs(CardDisplay.aspectRatio - 2.0 / 3.0) < 0.000_001, "display aspect ratio")
 

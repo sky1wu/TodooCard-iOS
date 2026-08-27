@@ -5,9 +5,13 @@ public enum CardPhysicalSize {
     public static let heightMillimeters = 97.5
     public static let thicknessMillimeters = 3.0
     public static let cornerRadiusMillimeters = 5.5
+    public static let displaySideInsetMillimeters = 5.0
+    public static let displayTopInsetMillimeters = 5.5
     public static let aspectRatio = widthMillimeters / heightMillimeters
     public static let thicknessToWidthRatio = thicknessMillimeters / widthMillimeters
     public static let cornerRadiusToWidthRatio = cornerRadiusMillimeters / widthMillimeters
+    public static let displaySideInsetToWidthRatio = displaySideInsetMillimeters / widthMillimeters
+    public static let displayTopInsetToHeightRatio = displayTopInsetMillimeters / heightMillimeters
 }
 
 public enum CardDisplay {
