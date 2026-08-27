@@ -17,6 +17,8 @@ TodooCard/T3 的原生 iOS 图片发送器。图片的解码、裁切、旋转�
   `FDF0/FDF1/FDF2` 两组 GATT 服务；
 - 控制命令优先采用可确认的 `withResponse` 写入，并从 CoreBluetooth 的 ATT 完成回调
   开始计算设备通知等待时间；仅在设备未通知或明确拒绝时走 `withoutResponse` 备用路径；
+- 如果 iOS 的 ATT 写入回调本身停滞，App 会自动断开以清空队列，再建立干净连接，等待
+  通知链路稳定后用单次 `withoutResponse` 重新握手；
 - 5 块发送窗口、4 ms 块间隔、60 ms 窗口间隔、32 块最大未确认量；
 - 累计 ACK、检查点超时有限重传，以及最终 `05 08` 刷新确认；
 - 应用内诊断日志、电量、Payload 字节数和 SHA-256。

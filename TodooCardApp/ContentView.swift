@@ -222,7 +222,7 @@ struct ContentView: View {
                 .frame(height: 50)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!editor.canSend || bluetooth.isSending)
+            .disabled(!editor.canSend || bluetooth.isSending || bluetooth.isRecoveringConnection)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -262,6 +262,7 @@ struct ContentView: View {
 
     private var primaryButtonLabel: String {
         if bluetooth.isSending { return "发送中" }
+        if bluetooth.isRecoveringConnection { return "正在重新连接" }
         if editor.isProcessing { return "正在准备图片" }
         return bluetooth.isConnected ? "发送到 TodooCard" : "连接并发送"
     }
