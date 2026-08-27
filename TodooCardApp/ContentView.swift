@@ -648,6 +648,52 @@ private struct EditorControlPanel: View {
           }
         }
         .pickerStyle(.segmented)
+
+        VStack(alignment: .leading, spacing: 8) {
+          HStack {
+            Label("亮度补偿", systemImage: "sun.max")
+              .font(.caption.weight(.semibold))
+            Spacer()
+            Text(
+              editor.brightnessCompensation.formatted(
+                .percent.precision(.fractionLength(0)).sign(strategy: .always())
+              )
+            )
+              .font(.caption.monospacedDigit().weight(.semibold))
+              .foregroundStyle(AppTheme.accent)
+          }
+
+          Slider(
+            value: Binding(
+              get: { editor.brightnessCompensation },
+              set: editor.setBrightnessCompensation
+            ),
+            in: -1...1,
+            step: 0.05
+          )
+          .tint(AppTheme.accent)
+          .accessibilityLabel("卡片亮度补偿")
+          .accessibilityValue(
+            editor.brightnessCompensation.formatted(
+              .percent.precision(.fractionLength(0)).sign(strategy: .always())
+            )
+          )
+
+          HStack {
+            Text("更暗")
+            Spacer()
+            Text("原始")
+            Spacer()
+            Text("更亮")
+          }
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+
+          Text("实体屏偏灰偏暗时向右调高；预览和发送图片会同步更新。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 2)
       }
 
       Divider()
@@ -927,6 +973,12 @@ private struct DiagnosticsView: View {
           LabeledContent("输出尺寸", value: "528 × 792")
           LabeledContent("显示效果", value: editor.algorithm.shortTitle)
           LabeledContent(
+            "亮度补偿",
+            value: editor.brightnessCompensation.formatted(
+              .percent.precision(.fractionLength(0)).sign(strategy: .always())
+            )
+          )
+          LabeledContent(
             "Payload", value: editor.payload.map { "\($0.count.formatted()) 字节" } ?? "—")
           VStack(alignment: .leading, spacing: 6) {
             Text("SHA-256")
@@ -993,7 +1045,7 @@ private struct DiagnosticsView: View {
       TodooCard 诊断报告
       App: \(version) (\(build))
       状态: \(bluetooth.statusText)
-      图片: 528 × 792 / \(editor.algorithm.shortTitle)
+      图片: 528 × 792 / \(editor.algorithm.shortTitle) / 亮度 \(editor.brightnessCompensation.formatted(.percent.precision(.fractionLength(0)).sign(strategy: .always())))
       Payload: \(editor.payload.map { "\($0.count) 字节" } ?? "—")
       SHA-256: \(editor.payloadSHA256)
       设备: \(bluetooth.connectedDeviceName ?? "未连接")

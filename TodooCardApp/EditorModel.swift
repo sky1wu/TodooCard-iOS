@@ -21,6 +21,7 @@ final class EditorModel: ObservableObject {
     @Published private(set) var focusX = 50.0
     @Published private(set) var focusY = 50.0
     @Published private(set) var algorithm = DitherAlgorithm.floydSteinberg
+    @Published private(set) var brightnessCompensation = 0.0
     private let strength: Float = 1
 
     private var generation = 0
@@ -78,11 +79,17 @@ final class EditorModel: ObservableObject {
         focusX = 50
         focusY = 50
         algorithm = .floydSteinberg
+        brightnessCompensation = 0
         errorMessage = nil
     }
 
     func setAlgorithm(_ value: DitherAlgorithm) {
         algorithm = value
+        scheduleProcessing()
+    }
+
+    func setBrightnessCompensation(_ value: Double) {
+        brightnessCompensation = min(1, max(-1, value))
         scheduleProcessing()
     }
 
@@ -163,7 +170,8 @@ final class EditorModel: ObservableObject {
             focusY: focusY,
             zoom: zoom,
             algorithm: algorithm,
-            strength: strength
+            strength: strength,
+            brightnessCompensation: Float(brightnessCompensation)
         )
 
         processingTask = Task { [weak self] in

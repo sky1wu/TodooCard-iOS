@@ -12,6 +12,7 @@ struct ImageProcessingRequest: @unchecked Sendable {
     let zoom: Double
     let algorithm: DitherAlgorithm
     let strength: Float
+    let brightnessCompensation: Float
 }
 
 struct ImageProcessingResult: @unchecked Sendable {
@@ -55,7 +56,8 @@ enum ImageProcessor {
             width: CardDisplay.width,
             height: CardDisplay.height,
             algorithm: request.algorithm,
-            strength: request.strength
+            strength: request.strength,
+            brightness: request.brightnessCompensation
         )
         let built = try T3PayloadBuilder.build(from: codes)
         let preview = try previewImage(from: codes)

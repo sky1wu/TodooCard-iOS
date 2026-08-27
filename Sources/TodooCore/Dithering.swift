@@ -56,6 +56,7 @@ public enum BitmapError: Error, LocalizedError, Equatable {
     case invalidDimensions
     case invalidByteCount(actual: Int, expected: Int)
     case invalidStrength
+    case invalidBrightness
 
     public var errorDescription: String? {
         switch self {
@@ -65,6 +66,8 @@ public enum BitmapError: Error, LocalizedError, Equatable {
             return "RGBA 位图有 \(actual) 字节，应为 \(expected) 字节。"
         case .invalidStrength:
             return "抖动强度必须在 0–150% 之间。"
+        case .invalidBrightness:
+            return "亮度补偿必须在 -100%–100% 之间。"
         }
     }
 }
@@ -90,7 +93,8 @@ public func ditherRGBA(
     width: Int,
     height: Int,
     algorithm: DitherAlgorithm = .floydSteinberg,
-    strength: Float = 1
+    strength: Float = 1,
+    brightness: Float = 0
 ) throws -> [UInt8] {
     guard width > 0, height > 0 else { throw BitmapError.invalidDimensions }
     let pixelCount = width * height
@@ -100,15 +104,33 @@ public func ditherRGBA(
     guard strength.isFinite, (0 ... 1.5).contains(strength) else {
         throw BitmapError.invalidStrength
     }
+    guard brightness.isFinite, (-1 ... 1).contains(brightness) else {
+        throw BitmapError.invalidBrightness
+    }
+
+    // Use a gamma curve rather than adding a fixed RGB offset. This lifts or
+    // lowers midtones while preserving pure black and white, which is more
+    // useful when compensating for a dim six-color e-paper panel.
+    let gamma = brightness >= 0 ? 1 / (1 + brightness) : 1 - brightness
+
+    @inline(__always)
+    func adjustedBrightness(_ value: Float) -> Float {
+        guard value > 0, value < 255, brightness != 0 else { return value }
+        return pow(value / 255, gamma) * 255
+    }
 
     var working = [Float](repeating: 0, count: pixelCount * 3)
     for pixel in 0 ..< pixelCount {
         let source = pixel * 4
         let target = pixel * 3
         let alpha = Float(rgba[source + 3]) / 255
-        working[target] = Float(rgba[source]) * alpha + 255 * (1 - alpha)
-        working[target + 1] = Float(rgba[source + 1]) * alpha + 255 * (1 - alpha)
-        working[target + 2] = Float(rgba[source + 2]) * alpha + 255 * (1 - alpha)
+        working[target] = adjustedBrightness(Float(rgba[source]) * alpha + 255 * (1 - alpha))
+        working[target + 1] = adjustedBrightness(
+            Float(rgba[source + 1]) * alpha + 255 * (1 - alpha)
+        )
+        working[target + 2] = adjustedBrightness(
+            Float(rgba[source + 2]) * alpha + 255 * (1 - alpha)
+        )
     }
 
     let bayer: [Float] = [
@@ -178,4 +200,3 @@ public func ditherRGBA(
     }
     return codes
 }
-

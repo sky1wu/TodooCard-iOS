@@ -41,6 +41,22 @@ func runChecks() throws {
     )
     try check(transparent == [1, 3], "transparent pixels composite onto white")
 
+    let unadjustedMidtone = try ditherRGBA(
+        [64, 64, 64, 255],
+        width: 1,
+        height: 1,
+        algorithm: .none
+    )
+    let brightenedMidtone = try ditherRGBA(
+        [64, 64, 64, 255],
+        width: 1,
+        height: 1,
+        algorithm: .none,
+        brightness: 1
+    )
+    try check(unadjustedMidtone == [0], "unadjusted midtone quantization")
+    try check(brightenedMidtone == [1], "brightness compensation lifts midtones")
+
     let packed = try T3PayloadBuilder.packColorCodes([0, 1, 2, 3])
     try check(packed == [0x01, 0x23], "nibble packing")
     try check(T3PayloadBuilder.rotate180(packed, width: 2, height: 2) == [0x32, 0x10], "180° rotation")
