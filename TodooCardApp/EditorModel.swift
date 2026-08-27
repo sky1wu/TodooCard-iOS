@@ -44,7 +44,11 @@ final class EditorModel: ObservableObject {
             return
         }
 
+        processingTask?.cancel()
         sourceImage = ImageProcessor.normalized(decoded)
+        previewImage = nil
+        payload = nil
+        payloadSHA256 = "—"
         rotation = 0
         zoom = 1
         focusX = 50

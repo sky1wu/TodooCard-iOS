@@ -128,8 +128,8 @@ enum ImageProcessor {
                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
                         | CGBitmapInfo.byteOrder32Big.rawValue
                   ) else { return false }
-            context.translateBy(x: 0, y: CGFloat(height))
-            context.scaleBy(x: 1, y: -1)
+            // CGImage and the RGBA preview both use top-to-bottom row order here.
+            // Applying UIKit's display-space flip a second time turns imports upside down.
             context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }

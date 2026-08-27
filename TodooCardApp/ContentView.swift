@@ -6,10 +6,19 @@ import UIKit
 import TodooCore
 #endif
 
+private enum EditorPanel: String, CaseIterable, Identifiable {
+    case framing
+    case color
+
+    var id: String { rawValue }
+    var title: String { self == .framing ? "构图" : "色彩" }
+}
+
 struct ContentView: View {
     @StateObject private var editor = EditorModel()
     @StateObject private var bluetooth = TodooBluetoothManager()
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var selectedPanel = EditorPanel.framing
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showDevicePicker = false
@@ -17,26 +26,31 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    PreviewCanvas(editor: editor)
-
-                    imageSourceButtons
-
-                    if editor.sourceImage != nil {
-                        framingCard
-                        colorCard
-                    }
-
-                    sendCard
-                    diagnosticsCard
+            Group {
+                if editor.sourceImage == nil {
+                    emptyState
+                } else {
+                    editorWorkspace
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 32)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle("TodooCard")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    importMenu
+                    Button { showDiagnostics = true } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityLabel("诊断信息")
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if editor.sourceImage != nil {
+                    sendBar
+                }
+            }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images)
         .onChange(of: selectedPhoto) { item in
@@ -48,7 +62,9 @@ struct ContentView: View {
                     }
                     await MainActor.run { editor.loadImage(data: data) }
                 } catch {
-                    await MainActor.run { editor.errorMessage = "读取照片失败：\(error.localizedDescription)" }
+                    await MainActor.run {
+                        editor.errorMessage = "读取照片失败：\(error.localizedDescription)"
+                    }
                 }
             }
         }
@@ -70,6 +86,9 @@ struct ContentView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsView(editor: editor, bluetooth: bluetooth)
+        }
         .alert("提示", isPresented: errorBinding) {
             Button("好") {
                 editor.errorMessage = nil
@@ -80,59 +99,109 @@ struct ContentView: View {
         }
     }
 
-    private var errorBinding: Binding<Bool> {
-        Binding(
-            get: { editor.errorMessage != nil || bluetooth.errorMessage != nil },
-            set: { value in
-                if !value {
-                    editor.errorMessage = nil
-                    bluetooth.errorMessage = nil
-                }
+    private var emptyState: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            Image(systemName: "rectangle.portrait.on.rectangle.portrait")
+                .font(.system(size: 58, weight: .light))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.blue)
+                .padding(.bottom, 22)
+
+            Text("为卡片选择一张图片")
+                .font(.title2.weight(.semibold))
+            Text("图片只在这台 iPhone 上处理，不会上传")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 7)
+
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Label("选择照片", systemImage: "photo.on.rectangle")
+                    .frame(minWidth: 150)
             }
-        )
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.top, 26)
+
+            Menu {
+                Button { showFileImporter = true } label: {
+                    Label("从文件选择", systemImage: "folder")
+                }
+                Button(action: pasteImage) {
+                    Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
+                }
+            } label: {
+                Text("其他导入方式")
+                    .font(.subheadline)
+            }
+            .padding(.top, 14)
+            Spacer()
+            Text("支持 PNG、JPEG、HEIF 和 WebP")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 24)
+        }
+        .padding(.horizontal, 32)
     }
 
-    private var imageSourceButtons: some View {
-        HStack(spacing: 10) {
-            sourceButton("照片", systemImage: "photo.on.rectangle") { showPhotoPicker = true }
-            sourceButton("文件", systemImage: "folder") { showFileImporter = true }
-            sourceButton("粘贴", systemImage: "doc.on.clipboard") {
-                guard let image = UIPasteboard.general.image,
-                      let data = image.pngData() else {
-                    editor.errorMessage = "剪贴板里没有可用的图片。"
-                    return
-                }
-                editor.loadImage(data: data)
-            }
+    private var editorWorkspace: some View {
+        VStack(spacing: 0) {
+            PreviewCanvas(editor: editor)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .frame(maxHeight: .infinity)
+                .layoutPriority(1)
+
+            Divider()
+            editorControls
         }
     }
 
-    private func sourceButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 13))
+    private var editorControls: some View {
+        VStack(spacing: 14) {
+            Picker("编辑工具", selection: $selectedPanel) {
+                ForEach(EditorPanel.allCases) { panel in
+                    Text(panel.title).tag(panel)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Group {
+                switch selectedPanel {
+                case .framing:
+                    framingControls
+                case .color:
+                    colorControls
+                }
+            }
+            .frame(minHeight: 86, alignment: .top)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(.regularMaterial)
     }
 
-    private var framingCard: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Label("画面", systemImage: "crop")
-                    .font(.headline)
+    private var framingControls: some View {
+        VStack(spacing: 13) {
+            HStack(spacing: 10) {
+                Button { editor.rotateClockwise() } label: {
+                    Label("向右旋转", systemImage: "rotate.right")
+                }
+                .buttonStyle(.bordered)
+
+                Button { editor.resetFraming() } label: {
+                    Label("还原", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
+
                 Spacer()
-                Button {
-                    editor.rotateClockwise()
-                } label: {
-                    Label("旋转", systemImage: "rotate.right")
-                }
-                .buttonStyle(.borderless)
-                Button("还原") { editor.resetFraming() }
-                    .buttonStyle(.borderless)
+                Text("\(editor.rotation)°")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 12) {
@@ -151,30 +220,31 @@ struct ContentView: View {
                     .frame(width: 42, alignment: .trailing)
             }
         }
-        .cardStyle()
     }
 
-    private var colorCard: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Label("六色成像", systemImage: "circle.hexagongrid.fill")
-                    .font(.headline)
-                Spacer()
-                Picker("算法", selection: Binding(get: { editor.algorithm }, set: editor.setAlgorithm)) {
-                    ForEach(DitherAlgorithm.allCases) { algorithm in
-                        Text(algorithm.title).tag(algorithm)
-                    }
+    private var colorControls: some View {
+        VStack(spacing: 12) {
+            Picker(
+                "量化方式",
+                selection: Binding(get: { editor.algorithm }, set: editor.setAlgorithm)
+            ) {
+                ForEach(DitherAlgorithm.allCases) { algorithm in
+                    Text(shortTitle(for: algorithm)).tag(algorithm)
                 }
-                .pickerStyle(.menu)
             }
+            .pickerStyle(.segmented)
 
-            HStack {
-                Text(editor.algorithm.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(editor.algorithm.title)
+                        .font(.subheadline.weight(.medium))
+                    Text(editor.algorithm.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if editor.algorithm != .none {
-                    Text("强度 \(Int(editor.strength * 100))%")
+                    Text("\(Int(editor.strength * 100))%")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -191,86 +261,110 @@ struct ContentView: View {
                 )
             }
         }
-        .cardStyle()
     }
 
-    private var sendCard: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: statusSymbol)
-                    .foregroundStyle(statusColor)
-                    .font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(bluetooth.statusText)
-                        .font(.subheadline.weight(.semibold))
-                    if editor.isProcessing {
-                        Text("正在生成实际六色 Payload")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if let payload = editor.payload {
-                        Text("\(payload.count.formatted()) 字节 · 528 × 792")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("选择图片后即可连接卡片")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if editor.isProcessing { ProgressView() }
-            }
-
+    private var sendBar: some View {
+        VStack(spacing: 9) {
             if bluetooth.isSending {
                 ProgressView(value: bluetooth.progress)
-                    .tint(.blue)
             }
 
-            Button(action: primaryAction) {
-                HStack {
-                    if bluetooth.isSending { ProgressView().tint(.white) }
-                    Image(systemName: bluetooth.isConnected ? "arrow.up.circle.fill" : "dot.radiowaves.left.and.right")
-                    Text(bluetooth.primaryButtonTitle)
+            HStack(spacing: 12) {
+                Image(systemName: statusSymbol)
+                    .font(.title3)
+                    .foregroundStyle(statusColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(statusTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(statusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
+
+                Spacer(minLength: 6)
+
+                Button(action: primaryAction) {
+                    HStack(spacing: 6) {
+                        if bluetooth.isSending {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: bluetooth.isConnected ? "arrow.up" : "antenna.radiowaves.left.and.right")
+                        }
+                        Text(primaryButtonLabel)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!editor.canSend || bluetooth.isSending)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(editor.canSend && !bluetooth.isSending ? Color.blue : Color.gray, in: RoundedRectangle(cornerRadius: 15))
-            .disabled(!editor.canSend || bluetooth.isSending)
         }
-        .cardStyle()
+        .padding(.horizontal, 16)
+        .padding(.top, 11)
+        .padding(.bottom, 9)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 
-    private var diagnosticsCard: some View {
-        DisclosureGroup(isExpanded: $showDiagnostics) {
-            VStack(alignment: .leading, spacing: 10) {
-                diagnosticRow("厂商 / 屏幕", "0x5053 / 0x134C")
-                diagnosticRow("电量", bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
-                diagnosticRow("Payload SHA-256", editor.payloadSHA256)
-                if !bluetooth.logs.isEmpty {
-                    Divider()
-                    Text(bluetooth.logs.joined(separator: "\n"))
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+    private var importMenu: some View {
+        Menu {
+            Button { showPhotoPicker = true } label: {
+                Label("照片", systemImage: "photo.on.rectangle")
             }
-            .padding(.top, 12)
+            Button { showFileImporter = true } label: {
+                Label("文件", systemImage: "folder")
+            }
+            Button(action: pasteImage) {
+                Label("粘贴", systemImage: "doc.on.clipboard")
+            }
         } label: {
-            Label("诊断信息", systemImage: "stethoscope")
-                .font(.headline)
+            Image(systemName: editor.sourceImage == nil ? "plus" : "photo.badge.plus")
         }
-        .cardStyle()
+        .accessibilityLabel(editor.sourceImage == nil ? "导入图片" : "更换图片")
     }
 
-    private func diagnosticRow(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.caption.monospaced()).textSelection(.enabled)
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { editor.errorMessage != nil || bluetooth.errorMessage != nil },
+            set: { value in
+                if !value {
+                    editor.errorMessage = nil
+                    bluetooth.errorMessage = nil
+                }
+            }
+        )
+    }
+
+    private var primaryButtonLabel: String {
+        if bluetooth.isSending { return "发送中" }
+        return bluetooth.isConnected ? "发送" : "连接"
+    }
+
+    private var statusTitle: String {
+        if editor.isProcessing { return "正在处理图片" }
+        return bluetooth.statusText
+    }
+
+    private var statusDetail: String {
+        if editor.isProcessing { return "生成六色预览与 Payload" }
+        if let payload = editor.payload {
+            return "\(payload.count.formatted()) 字节 · 528 × 792"
         }
+        return "等待图片处理完成"
+    }
+
+    private var statusSymbol: String {
+        if editor.isProcessing { return "wand.and.stars" }
+        if bluetooth.statusText == "卡片屏幕刷新成功" { return "checkmark.circle.fill" }
+        if bluetooth.isConnected { return "link.circle.fill" }
+        return "circle.dashed"
+    }
+
+    private var statusColor: Color {
+        if bluetooth.statusText == "卡片屏幕刷新成功" { return .green }
+        return .blue
     }
 
     private func primaryAction() {
@@ -283,14 +377,21 @@ struct ContentView: View {
         }
     }
 
-    private var statusSymbol: String {
-        if bluetooth.statusText == "卡片屏幕刷新成功" { return "checkmark.circle.fill" }
-        if bluetooth.isConnected { return "link.circle.fill" }
-        return "circle.dashed"
+    private func pasteImage() {
+        guard let image = UIPasteboard.general.image, let data = image.pngData() else {
+            editor.errorMessage = "剪贴板里没有可用的图片。"
+            return
+        }
+        editor.loadImage(data: data)
     }
 
-    private var statusColor: Color {
-        bluetooth.statusText == "卡片屏幕刷新成功" ? .green : .blue
+    private func shortTitle(for algorithm: DitherAlgorithm) -> String {
+        switch algorithm {
+        case .floydSteinberg: return "均衡"
+        case .atkinson: return "柔和"
+        case .orderedBayer: return "网点"
+        case .none: return "纯色"
+        }
     }
 }
 
@@ -301,62 +402,121 @@ private struct PreviewCanvas: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                Color.white
-                if let image = editor.previewImage ?? editor.sourceImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .interpolation(editor.previewImage == nil ? .high : .none)
-                        .scaledToFit()
-                        .scaleEffect(pinchScale)
-                        .offset(dragOffset)
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "photo.badge.plus")
-                            .font(.system(size: 38, weight: .light))
-                        Text("选择一张图片")
-                            .font(.headline)
-                        Text("图片只在本机处理，不会上传")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            let width = min(proxy.size.width, proxy.size.height * 2 / 3)
+            let height = width * 3 / 2
 
-                if editor.isProcessing, editor.previewImage != nil {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        Spacer()
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+
+                ZStack {
+                    Color.white
+                    if let image = editor.previewImage ?? editor.sourceImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .interpolation(editor.previewImage == nil ? .high : .none)
+                            .scaledToFit()
+                            .scaleEffect(pinchScale)
+                            .offset(dragOffset)
                     }
-                    .padding(10)
+
+                    if editor.isProcessing {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Label("处理中", systemImage: "wand.and.stars")
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(.regularMaterial, in: Capsule())
+                            }
+                            Spacer()
+                        }
+                        .padding(10)
+                    }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+                }
+                .padding(10)
             }
+            .frame(width: width, height: height)
+            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture()
                     .updating($dragOffset) { value, state, _ in state = value.translation }
-                    .onEnded { editor.applyDrag($0.translation, in: proxy.size) }
+                    .onEnded {
+                        editor.applyDrag(
+                            $0.translation,
+                            in: CGSize(width: width - 20, height: height - 20)
+                        )
+                    }
             )
             .simultaneousGesture(
                 MagnificationGesture()
                     .updating($pinchScale) { value, state, _ in state = value }
                     .onEnded { editor.setZoom(editor.zoom * $0) }
             )
+            .accessibilityLabel("六色图片预览")
+            .accessibilityHint("拖动调整位置，双指缩放")
         }
-        .aspectRatio(CGFloat(CardDisplay.width) / CGFloat(CardDisplay.height), contentMode: .fit)
-        .frame(maxWidth: 340)
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        .frame(minHeight: 220, idealHeight: 500)
+    }
+}
+
+private struct DiagnosticsView: View {
+    @ObservedObject var editor: EditorModel
+    @ObservedObject var bluetooth: TodooBluetoothManager
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("图片") {
+                    LabeledContent("输出尺寸", value: "528 × 792")
+                    LabeledContent("Payload", value: editor.payload.map { "\($0.count.formatted()) 字节" } ?? "—")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("SHA-256")
+                        Text(editor.payloadSHA256)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section("设备") {
+                    LabeledContent("厂商 / 屏幕", value: "0x5053 / 0x134C")
+                    LabeledContent("连接", value: bluetooth.connectedDeviceName ?? "未连接")
+                    LabeledContent("电量", value: bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
+                }
+
+                Section("日志") {
+                    if bluetooth.logs.isEmpty {
+                        Text("暂无日志").foregroundStyle(.secondary)
+                    } else {
+                        Text(bluetooth.logs.joined(separator: "\n"))
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle("诊断信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("复制") {
+                        UIPasteboard.general.string = bluetooth.logs.joined(separator: "\n")
+                    }
+                    .disabled(bluetooth.logs.isEmpty)
+                }
+            }
         }
-        .shadow(color: .black.opacity(0.08), radius: 18, y: 7)
-        .padding(.top, 4)
     }
 }
 
@@ -369,33 +529,44 @@ private struct DevicePicker: View {
         NavigationStack {
             List {
                 if bluetooth.devices.isEmpty {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text(bluetooth.isScanning ? "正在查找附近的 TodooCard…" : "没有找到兼容设备")
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    ForEach(bluetooth.devices) { device in
-                        Button { onSelect(device) } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "rectangle.portrait.on.rectangle.portrait")
-                                    .font(.title2)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(device.name).foregroundStyle(.primary)
-                                    Text("固件 0x\(String(format: "%02X", device.firmwareVersion)) · RSSI \(device.rssi)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if device.pairingWindowOpen {
-                                        Text("请先完成系统配对")
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    Section {
+                        HStack(spacing: 12) {
+                            if bluetooth.isScanning { ProgressView() }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(bluetooth.isScanning ? "正在查找附近设备" : "没有找到兼容设备")
+                                Text("请让 TodooCard 保持开机并靠近 iPhone")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        .disabled(device.pairingWindowOpen)
+                    }
+                } else {
+                    Section("附近设备") {
+                        ForEach(bluetooth.devices) { device in
+                            Button { onSelect(device) } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "rectangle.portrait.on.rectangle.portrait")
+                                        .font(.title2)
+                                        .frame(width: 28)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(device.name).foregroundStyle(.primary)
+                                        Text("固件 0x\(String(format: "%02X", device.firmwareVersion)) · RSSI \(device.rssi)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if device.pairingWindowOpen {
+                                            Text("请先完成系统配对")
+                                                .font(.caption)
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .disabled(device.pairingWindowOpen)
+                        }
                     }
                 }
             }
@@ -410,12 +581,5 @@ private struct DevicePicker: View {
                 }
             }
         }
-    }
-}
-
-private extension View {
-    func cardStyle() -> some View {
-        padding(16)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 }
