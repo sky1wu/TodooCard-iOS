@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Core checks and iOS build
+    name: Core checks and IPA build
     runs-on: macos-15
     timeout-minutes: 20
 
@@ -38,24 +38,34 @@ jobs:
           xcodebuild \
             -project TodooCard.xcodeproj \
             -scheme TodooCard \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/TodooCardDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
 
-      - name: Prepare simulator app artifact
+      - name: Package unsigned IPA
         run: |
-          APP_PATH="$RUNNER_TEMP/TodooCardDerivedData/Build/Products/Debug-iphonesimulator/TodooCard.app"
+          APP_PATH="$RUNNER_TEMP/TodooCardDerivedData/Build/Products/Release-iphoneos/TodooCard.app"
+          IPA_ROOT="$RUNNER_TEMP/TodooCardIPA"
           test -d "$APP_PATH"
-          mkdir -p "$RUNNER_TEMP/TodooCardArtifact"
-          cp -R "$APP_PATH" "$RUNNER_TEMP/TodooCardArtifact/TodooCard.app"
+          test -x "$APP_PATH/TodooCard"
+          mkdir -p "$IPA_ROOT/Payload"
+          cp -R "$APP_PATH" "$IPA_ROOT/Payload/TodooCard.app"
+          (
+            cd "$IPA_ROOT"
+            /usr/bin/zip -qry "$RUNNER_TEMP/TodooCard.ipa" Payload
+          )
+          unzip -tq "$RUNNER_TEMP/TodooCard.ipa"
+          unzip -Z1 "$RUNNER_TEMP/TodooCard.ipa" | grep -q '^Payload/TodooCard.app/Info.plist$'
+          file "$APP_PATH/TodooCard"
+          shasum -a 256 "$RUNNER_TEMP/TodooCard.ipa"
 
-      - name: Upload simulator app
-        uses: actions/upload-artifact@v6
+      - name: Upload IPA
+        uses: actions/upload-artifact@v7
         with:
-          name: TodooCard.app
-          path: ${{ runner.temp }}/TodooCardArtifact
+          path: ${{ runner.temp }}/TodooCard.ipa
+          archive: false
           if-no-files-found: error
           retention-days: 14
