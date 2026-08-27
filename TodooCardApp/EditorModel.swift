@@ -21,12 +21,19 @@ final class EditorModel: ObservableObject {
     @Published private(set) var focusX = 50.0
     @Published private(set) var focusY = 50.0
     @Published private(set) var algorithm = DitherAlgorithm.floydSteinberg
-    @Published private(set) var strength: Float = 1
+    private let strength: Float = 1
 
     private var generation = 0
     private var processingTask: Task<Void, Never>?
 
     var canSend: Bool { payload != nil && !isProcessing }
+
+    var hasFramingChanges: Bool {
+        rotation != 0
+            || abs(zoom - 1) > 0.001
+            || abs(focusX - 50) > 0.001
+            || abs(focusY - 50) > 0.001
+    }
 
     func loadImage(data: Data) {
         guard data.count <= Self.maximumImageBytes else {
@@ -62,11 +69,6 @@ final class EditorModel: ObservableObject {
         scheduleProcessing()
     }
 
-    func setStrength(_ value: Float) {
-        strength = min(1.5, max(0, value))
-        scheduleProcessing()
-    }
-
     func setZoom(_ value: Double) {
         zoom = min(4, max(1, value))
         scheduleProcessing()
@@ -80,14 +82,24 @@ final class EditorModel: ObservableObject {
     }
 
     func resetFraming() {
+        rotation = 0
         zoom = 1
         focusX = 50
         focusY = 50
         scheduleProcessing()
     }
 
-    func applyDrag(_ translation: CGSize, in viewport: CGSize) {
+    func applyGesture(
+        translation: CGSize,
+        magnification: Double,
+        in viewport: CGSize
+    ) {
         guard let image = sourceImage, viewport.width > 0, viewport.height > 0,
+              magnification.isFinite,
+              magnification > 0 else { return }
+
+        zoom = min(4, max(1, zoom * magnification))
+        guard
               let layout = try? computeCoverLayout(
                 sourceWidth: image.size.width,
                 sourceHeight: image.size.height,
@@ -95,7 +107,8 @@ final class EditorModel: ObservableObject {
                 focusX: focusX,
                 focusY: focusY,
                 zoom: zoom
-              ) else { return }
+              )
+        else { return }
 
         let targetDeltaX = Double(translation.width / viewport.width) * Double(CardDisplay.width)
         let targetDeltaY = Double(translation.height / viewport.height) * Double(CardDisplay.height)

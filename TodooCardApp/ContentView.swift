@@ -6,19 +6,10 @@ import UIKit
 import TodooCore
 #endif
 
-private enum EditorPanel: String, CaseIterable, Identifiable {
-    case framing
-    case color
-
-    var id: String { rawValue }
-    var title: String { self == .framing ? "构图" : "色彩" }
-}
-
 struct ContentView: View {
     @StateObject private var editor = EditorModel()
     @StateObject private var bluetooth = TodooBluetoothManager()
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var selectedPanel = EditorPanel.framing
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showDevicePicker = false
@@ -148,162 +139,94 @@ struct ContentView: View {
     }
 
     private var editorWorkspace: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             PreviewCanvas(editor: editor)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
-                .frame(maxHeight: .infinity)
-                .layoutPriority(1)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 74)
+
+            editingToolbar
+                .padding(.bottom, 16)
+        }
+    }
+
+    private var editingToolbar: some View {
+        HStack(spacing: 4) {
+            Button { editor.rotateClockwise() } label: {
+                Image(systemName: "rotate.right")
+                    .frame(width: 38, height: 38)
+            }
+            .accessibilityLabel("向右旋转")
 
             Divider()
-            editorControls
-        }
-    }
+                .frame(height: 22)
 
-    private var editorControls: some View {
-        VStack(spacing: 14) {
-            Picker("编辑工具", selection: $selectedPanel) {
-                ForEach(EditorPanel.allCases) { panel in
-                    Text(panel.title).tag(panel)
+            Menu {
+                Picker(
+                    "显示效果",
+                    selection: Binding(get: { editor.algorithm }, set: editor.setAlgorithm)
+                ) {
+                    ForEach(DitherAlgorithm.allCases) { algorithm in
+                        Label(shortTitle(for: algorithm), systemImage: algorithmSymbol(for: algorithm))
+                            .tag(algorithm)
+                    }
                 }
+            } label: {
+                Label(shortTitle(for: editor.algorithm), systemImage: "camera.filters")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .frame(height: 38)
             }
-            .pickerStyle(.segmented)
 
-            Group {
-                switch selectedPanel {
-                case .framing:
-                    framingControls
-                case .color:
-                    colorControls
-                }
-            }
-            .frame(minHeight: 86, alignment: .top)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .background(.regularMaterial)
-    }
-
-    private var framingControls: some View {
-        VStack(spacing: 13) {
-            HStack(spacing: 10) {
-                Button { editor.rotateClockwise() } label: {
-                    Label("向右旋转", systemImage: "rotate.right")
-                }
-                .buttonStyle(.bordered)
-
+            if editor.hasFramingChanges {
+                Divider()
+                    .frame(height: 22)
                 Button { editor.resetFraming() } label: {
-                    Label("还原", systemImage: "arrow.counterclockwise")
+                    Image(systemName: "arrow.counterclockwise")
+                        .frame(width: 38, height: 38)
                 }
-                .buttonStyle(.bordered)
-
-                Spacer()
-                Text("\(editor.rotation)°")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 12) {
-                Image(systemName: "minus.magnifyingglass")
-                    .foregroundStyle(.secondary)
-                Slider(
-                    value: Binding(get: { editor.zoom }, set: editor.setZoom),
-                    in: 1 ... 4,
-                    step: 0.01
-                )
-                Image(systemName: "plus.magnifyingglass")
-                    .foregroundStyle(.secondary)
-                Text(String(format: "%.2f×", editor.zoom))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 42, alignment: .trailing)
+                .accessibilityLabel("还原构图")
+                .transition(.opacity.combined(with: .scale))
             }
         }
-    }
-
-    private var colorControls: some View {
-        VStack(spacing: 12) {
-            Picker(
-                "量化方式",
-                selection: Binding(get: { editor.algorithm }, set: editor.setAlgorithm)
-            ) {
-                ForEach(DitherAlgorithm.allCases) { algorithm in
-                    Text(shortTitle(for: algorithm)).tag(algorithm)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(editor.algorithm.title)
-                        .font(.subheadline.weight(.medium))
-                    Text(editor.algorithm.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if editor.algorithm != .none {
-                    Text("\(Int(editor.strength * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if editor.algorithm != .none {
-                Slider(
-                    value: Binding(
-                        get: { Double(editor.strength) },
-                        set: { editor.setStrength(Float($0)) }
-                    ),
-                    in: 0 ... 1.5,
-                    step: 0.05
-                )
-            }
+        .foregroundStyle(.primary)
+        .padding(5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+        .animation(.easeInOut(duration: 0.18), value: editor.hasFramingChanges)
     }
 
     private var sendBar: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 10) {
             if bluetooth.isSending {
                 ProgressView(value: bluetooth.progress)
+                Text(bluetooth.statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 12) {
-                Image(systemName: statusSymbol)
-                    .font(.title3)
-                    .foregroundStyle(statusColor)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(statusTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(statusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 6)
-
-                Button(action: primaryAction) {
-                    HStack(spacing: 6) {
-                        if bluetooth.isSending {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: bluetooth.isConnected ? "arrow.up" : "antenna.radiowaves.left.and.right")
-                        }
-                        Text(primaryButtonLabel)
+            Button(action: primaryAction) {
+                HStack(spacing: 8) {
+                    if editor.isProcessing || bluetooth.isSending {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: bluetooth.isConnected ? "arrow.up" : "antenna.radiowaves.left.and.right")
                     }
+                    Text(primaryButtonLabel)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!editor.canSend || bluetooth.isSending)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
             }
+            .buttonStyle(.borderedProminent)
+            .disabled(!editor.canSend || bluetooth.isSending)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 11)
-        .padding(.bottom, 9)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
     }
@@ -339,32 +262,8 @@ struct ContentView: View {
 
     private var primaryButtonLabel: String {
         if bluetooth.isSending { return "发送中" }
-        return bluetooth.isConnected ? "发送" : "连接"
-    }
-
-    private var statusTitle: String {
-        if editor.isProcessing { return "正在处理图片" }
-        return bluetooth.statusText
-    }
-
-    private var statusDetail: String {
-        if editor.isProcessing { return "生成六色预览与 Payload" }
-        if let payload = editor.payload {
-            return "\(payload.count.formatted()) 字节 · 528 × 792"
-        }
-        return "等待图片处理完成"
-    }
-
-    private var statusSymbol: String {
-        if editor.isProcessing { return "wand.and.stars" }
-        if bluetooth.statusText == "卡片屏幕刷新成功" { return "checkmark.circle.fill" }
-        if bluetooth.isConnected { return "link.circle.fill" }
-        return "circle.dashed"
-    }
-
-    private var statusColor: Color {
-        if bluetooth.statusText == "卡片屏幕刷新成功" { return .green }
-        return .blue
+        if editor.isProcessing { return "正在准备图片" }
+        return bluetooth.isConnected ? "发送到 TodooCard" : "连接并发送"
     }
 
     private func primaryAction() {
@@ -393,77 +292,143 @@ struct ContentView: View {
         case .none: return "纯色"
         }
     }
+
+    private func algorithmSymbol(for algorithm: DitherAlgorithm) -> String {
+        switch algorithm {
+        case .floydSteinberg: return "circle.lefthalf.filled"
+        case .atkinson: return "circle.dotted"
+        case .orderedBayer: return "circle.grid.3x3.fill"
+        case .none: return "square.fill"
+        }
+    }
 }
 
 private struct PreviewCanvas: View {
     @ObservedObject var editor: EditorModel
-    @GestureState private var dragOffset = CGSize.zero
-    @GestureState private var pinchScale = 1.0
+    @GestureState private var gesture = CropGestureState()
 
     var body: some View {
         GeometryReader { proxy in
             let width = min(proxy.size.width, proxy.size.height * 2 / 3)
             let height = width * 3 / 2
+            let canvasSize = CGSize(width: width, height: height)
+            let interactiveZoom = min(4, max(1, editor.zoom * Double(gesture.magnification)))
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
+                Color.white
 
-                ZStack {
-                    Color.white
-                    if let image = editor.previewImage ?? editor.sourceImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .interpolation(editor.previewImage == nil ? .high : .none)
-                            .scaledToFit()
-                            .scaleEffect(pinchScale)
-                            .offset(dragOffset)
-                    }
+                if let source = editor.sourceImage, gesture.isActive || editor.isProcessing {
+                    SourceCropPreview(
+                        image: source,
+                        rotation: editor.rotation,
+                        focusX: editor.focusX,
+                        focusY: editor.focusY,
+                        zoom: interactiveZoom,
+                        translation: gesture.translation
+                    )
+                } else if let preview = editor.previewImage {
+                    Image(uiImage: preview)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFill()
+                }
 
-                    if editor.isProcessing {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Label("处理中", systemImage: "wand.and.stars")
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .background(.regularMaterial, in: Capsule())
-                            }
-                            Spacer()
-                        }
+                if editor.isProcessing && !gesture.isActive {
+                    ProgressView()
                         .padding(10)
-                    }
+                        .background(.regularMaterial, in: Circle())
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
-                }
-                .padding(10)
             }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.1), radius: 16, y: 6)
             .frame(width: width, height: height)
             .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .updating($dragOffset) { value, state, _ in state = value.translation }
-                    .onEnded {
-                        editor.applyDrag(
-                            $0.translation,
-                            in: CGSize(width: width - 20, height: height - 20)
-                        )
-                    }
-            )
-            .simultaneousGesture(
-                MagnificationGesture()
-                    .updating($pinchScale) { value, state, _ in state = value }
-                    .onEnded { editor.setZoom(editor.zoom * $0) }
-            )
+            .gesture(cropGesture(in: canvasSize))
             .accessibilityLabel("六色图片预览")
             .accessibilityHint("拖动调整位置，双指缩放")
+            .accessibilityValue(String(format: "缩放 %.1f 倍", editor.zoom))
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: editor.setZoom(editor.zoom * 1.25)
+                case .decrement: editor.setZoom(editor.zoom / 1.25)
+                @unknown default: break
+                }
+            }
+            .accessibilityAction(named: "还原构图") {
+                editor.resetFraming()
+            }
         }
         .frame(minHeight: 220, idealHeight: 500)
+    }
+
+    private func cropGesture(in viewport: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .simultaneously(with: MagnificationGesture())
+            .updating($gesture) { value, state, _ in
+                state.isActive = true
+                state.translation = value.first?.translation ?? .zero
+                state.magnification = value.second ?? 1
+            }
+            .onEnded { value in
+                editor.applyGesture(
+                    translation: value.first?.translation ?? .zero,
+                    magnification: Double(value.second ?? 1),
+                    in: viewport
+                )
+            }
+    }
+}
+
+private struct CropGestureState {
+    var isActive = false
+    var translation = CGSize.zero
+    var magnification: CGFloat = 1
+}
+
+private struct SourceCropPreview: View {
+    let image: UIImage
+    let rotation: Int
+    let focusX: Double
+    let focusY: Double
+    let zoom: Double
+    let translation: CGSize
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let layout = try? computeCoverLayout(
+                sourceWidth: image.size.width,
+                sourceHeight: image.size.height,
+                targetWidth: proxy.size.width,
+                targetHeight: proxy.size.height,
+                rotation: rotation,
+                focusX: focusX,
+                focusY: focusY,
+                zoom: zoom
+            ) {
+                let cropX = min(layout.overflowX, max(0, layout.cropX - Double(translation.width)))
+                let cropY = min(layout.overflowY, max(0, layout.cropY - Double(translation.height)))
+
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: layout.drawWidth, height: layout.drawHeight)
+                    .rotationEffect(.degrees(Double(rotation)))
+                    .position(
+                        x: -cropX + layout.rotatedDrawWidth / 2,
+                        y: -cropY + layout.rotatedDrawHeight / 2
+                    )
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
     }
 }
 
