@@ -1,0 +1,146 @@
+import Combine
+import UIKit
+#if canImport(TodooCore)
+import TodooCore
+#endif
+
+@MainActor
+final class EditorModel: ObservableObject {
+    static let maximumImageBytes = 100_000_000
+    static let maximumImagePixels = 50_000_000
+
+    @Published private(set) var sourceImage: UIImage?
+    @Published private(set) var previewImage: UIImage?
+    @Published private(set) var payload: Data?
+    @Published private(set) var payloadSHA256 = "—"
+    @Published private(set) var isProcessing = false
+    @Published var errorMessage: String?
+
+    @Published private(set) var rotation = 0
+    @Published private(set) var zoom = 1.0
+    @Published private(set) var focusX = 50.0
+    @Published private(set) var focusY = 50.0
+    @Published private(set) var algorithm = DitherAlgorithm.floydSteinberg
+    @Published private(set) var strength: Float = 1
+
+    private var generation = 0
+    private var processingTask: Task<Void, Never>?
+
+    var canSend: Bool { payload != nil && !isProcessing }
+
+    func loadImage(data: Data) {
+        guard data.count <= Self.maximumImageBytes else {
+            errorMessage = "图片超过 100 MB 安全限制。"
+            return
+        }
+        guard let decoded = UIImage(data: data) else {
+            errorMessage = "无法解码这张图片，请改用 PNG、JPEG、HEIF 或 WebP。"
+            return
+        }
+        let pixelWidth = decoded.cgImage?.width ?? Int(decoded.size.width * decoded.scale)
+        let pixelHeight = decoded.cgImage?.height ?? Int(decoded.size.height * decoded.scale)
+        guard pixelWidth * pixelHeight <= Self.maximumImagePixels else {
+            errorMessage = "图片超过 5000 万像素安全限制。"
+            return
+        }
+
+        sourceImage = ImageProcessor.normalized(decoded)
+        rotation = 0
+        zoom = 1
+        focusX = 50
+        focusY = 50
+        errorMessage = nil
+        scheduleProcessing()
+    }
+
+    func setAlgorithm(_ value: DitherAlgorithm) {
+        algorithm = value
+        scheduleProcessing()
+    }
+
+    func setStrength(_ value: Float) {
+        strength = min(1.5, max(0, value))
+        scheduleProcessing()
+    }
+
+    func setZoom(_ value: Double) {
+        zoom = min(4, max(1, value))
+        scheduleProcessing()
+    }
+
+    func rotateClockwise() {
+        rotation = (rotation + 90) % 360
+        focusX = 50
+        focusY = 50
+        scheduleProcessing()
+    }
+
+    func resetFraming() {
+        zoom = 1
+        focusX = 50
+        focusY = 50
+        scheduleProcessing()
+    }
+
+    func applyDrag(_ translation: CGSize, in viewport: CGSize) {
+        guard let image = sourceImage, viewport.width > 0, viewport.height > 0,
+              let layout = try? computeCoverLayout(
+                sourceWidth: image.size.width,
+                sourceHeight: image.size.height,
+                rotation: rotation,
+                focusX: focusX,
+                focusY: focusY,
+                zoom: zoom
+              ) else { return }
+
+        let targetDeltaX = Double(translation.width / viewport.width) * Double(CardDisplay.width)
+        let targetDeltaY = Double(translation.height / viewport.height) * Double(CardDisplay.height)
+        if layout.overflowX > 0 {
+            focusX = min(100, max(0, (layout.cropX - targetDeltaX) / layout.overflowX * 100))
+        }
+        if layout.overflowY > 0 {
+            focusY = min(100, max(0, (layout.cropY - targetDeltaY) / layout.overflowY * 100))
+        }
+        scheduleProcessing()
+    }
+
+    private func scheduleProcessing() {
+        guard let sourceImage else { return }
+        generation += 1
+        let expectedGeneration = generation
+        processingTask?.cancel()
+        payload = nil
+        isProcessing = true
+        let request = ImageProcessingRequest(
+            image: sourceImage,
+            rotation: rotation,
+            focusX: focusX,
+            focusY: focusY,
+            zoom: zoom,
+            algorithm: algorithm,
+            strength: strength
+        )
+
+        processingTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 120_000_000)
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try Task.checkCancellation()
+                    return try ImageProcessor.process(request)
+                }.value
+                guard !Task.isCancelled, let self, self.generation == expectedGeneration else { return }
+                self.previewImage = result.preview
+                self.payload = result.payload
+                self.payloadSHA256 = result.payloadSHA256
+                self.isProcessing = false
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, self.generation == expectedGeneration else { return }
+                self.payload = nil
+                self.isProcessing = false
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
