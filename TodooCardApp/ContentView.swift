@@ -585,6 +585,7 @@ private struct DeviceConnectionCallout: View {
 
 private struct PreviewCanvas: View {
   @ObservedObject var editor: EditorModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @GestureState private var gesture = CropGestureState()
 
   var body: some View {
@@ -594,66 +595,99 @@ private struct PreviewCanvas: View {
       let cardHeight = min(proxy.size.height * 0.96, proxy.size.width / cardAspectRatio)
       let cardWidth = cardHeight * cardAspectRatio
       let cardCornerRadius = cardWidth * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
+      let cardThickness = cardWidth * CGFloat(CardPhysicalSize.thicknessToWidthRatio)
       let screenWidth = cardWidth * 0.86
       let screenHeight = screenWidth / screenAspectRatio
       let screenSize = CGSize(width: screenWidth, height: screenHeight)
       let interactiveZoom = min(4, max(1, editor.zoom * Double(gesture.magnification)))
+      let tilt = deviceTilt(cardSize: CGSize(width: cardWidth, height: cardHeight))
+      let depthOffset = deviceDepthOffset(thickness: cardThickness, tilt: tilt)
 
       ZStack(alignment: .top) {
-        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-          .fill(AppTheme.deviceShell)
-          .overlay {
-            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-              .stroke(Color.white.opacity(0.72), lineWidth: 1)
-          }
+        DeviceThicknessLayers(
+          size: CGSize(width: cardWidth, height: cardHeight),
+          cornerRadius: cardCornerRadius,
+          depthOffset: depthOffset
+        )
 
-        ZStack {
-          AppTheme.paper
-
-          if let source = editor.sourceImage, gesture.isActive || editor.isProcessing {
-            SourceCropPreview(
-              image: source,
-              rotation: editor.rotation,
-              focusX: editor.focusX,
-              focusY: editor.focusY,
-              zoom: interactiveZoom,
-              translation: gesture.translation
-            )
-          } else if let preview = editor.previewImage {
-            Image(uiImage: preview)
-              .resizable()
-              .interpolation(.high)
-              .scaledToFill()
-          }
-
-          if editor.isProcessing && !gesture.isActive {
-            HStack(spacing: 7) {
-              ProgressView().controlSize(.small)
-              Text("处理中").font(.caption.weight(.semibold))
+        ZStack(alignment: .top) {
+          RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+            .fill(AppTheme.deviceShell)
+            .overlay {
+              RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(0.72), lineWidth: 1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(.regularMaterial, in: Capsule())
-            .padding(10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+          ZStack {
+            AppTheme.paper
+
+            if let source = editor.sourceImage, gesture.isActive || editor.isProcessing {
+              SourceCropPreview(
+                image: source,
+                rotation: editor.rotation,
+                focusX: editor.focusX,
+                focusY: editor.focusY,
+                zoom: interactiveZoom,
+                translation: gesture.translation
+              )
+            } else if let preview = editor.previewImage {
+              Image(uiImage: preview)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+            }
+
+            if editor.isProcessing && !gesture.isActive {
+              HStack(spacing: 7) {
+                ProgressView().controlSize(.small)
+                Text("处理中").font(.caption.weight(.semibold))
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 7)
+              .background(.regularMaterial, in: Capsule())
+              .padding(10)
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
           }
+          .frame(width: screenWidth, height: screenHeight)
+          .clipShape(RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous))
+          .overlay {
+            RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous)
+              .stroke(Color.black.opacity(0.17), lineWidth: 1)
+          }
+          .padding(.top, cardHeight * 0.045)
+          .contentShape(Rectangle())
+          .gesture(cropGesture(in: screenSize))
         }
-        .frame(width: screenWidth, height: screenHeight)
-        .clipShape(RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous))
-        .overlay {
-          RoundedRectangle(cornerRadius: cardWidth * 0.028, style: .continuous)
-            .stroke(Color.black.opacity(0.17), lineWidth: 1)
-        }
-        .padding(.top, cardHeight * 0.045)
-        .contentShape(Rectangle())
-        .gesture(cropGesture(in: screenSize))
+        .frame(width: cardWidth, height: cardHeight)
       }
       .frame(width: cardWidth, height: cardHeight)
-      .shadow(color: AppTheme.shadow, radius: 22, y: 12)
+      .rotation3DEffect(
+        .degrees(tilt.pitch),
+        axis: (x: 1, y: 0, z: 0),
+        perspective: 0.72
+      )
+      .rotation3DEffect(
+        .degrees(tilt.yaw),
+        axis: (x: 0, y: 1, z: 0),
+        perspective: 0.72
+      )
+      .shadow(
+        color: AppTheme.shadow,
+        radius: gesture.isActive ? 27 : 22,
+        x: -depthOffset.width * 1.8,
+        y: 12 - depthOffset.height * 1.4
+      )
       .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+      .animation(
+        reduceMotion || gesture.isActive
+          ? nil
+          : .spring(response: 0.42, dampingFraction: 0.78),
+        value: gesture.isActive
+      )
       .accessibilityElement(children: .ignore)
       .accessibilityLabel("TodooCard 六色屏幕预览")
-      .accessibilityHint("拖动调整位置，双指缩放")
+      .accessibilityHint("拖动调整位置并查看机身立体效果，双指缩放")
       .accessibilityValue(String(format: "缩放 %.1f 倍", editor.zoom))
       .accessibilityAdjustableAction { direction in
         switch direction {
@@ -681,6 +715,60 @@ private struct PreviewCanvas: View {
           in: viewport
         )
       }
+  }
+
+  private func deviceTilt(cardSize: CGSize) -> (pitch: Double, yaw: Double) {
+    guard gesture.isActive, !reduceMotion, cardSize.width > 0, cardSize.height > 0 else {
+      return (0, 0)
+    }
+    let horizontal = min(1, max(-1, gesture.translation.width / (cardSize.width * 0.35)))
+    let vertical = min(1, max(-1, gesture.translation.height / (cardSize.height * 0.35)))
+    return (pitch: Double(-vertical * 12), yaw: Double(horizontal * 14))
+  }
+
+  private func deviceDepthOffset(
+    thickness: CGFloat,
+    tilt: (pitch: Double, yaw: Double)
+  ) -> CGSize {
+    let pitch = tilt.pitch * .pi / 180
+    let yaw = tilt.yaw * .pi / 180
+    return CGSize(
+      width: -CGFloat(sin(yaw)) * thickness,
+      height: CGFloat(sin(pitch)) * thickness
+    )
+  }
+}
+
+private struct DeviceThicknessLayers: View {
+  let size: CGSize
+  let cornerRadius: CGFloat
+  let depthOffset: CGSize
+  private let layerCount = 10
+
+  var body: some View {
+    ZStack {
+      ForEach((1 ... layerCount).reversed(), id: \.self) { layer in
+        let progress = CGFloat(layer) / CGFloat(layerCount)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+          .fill(
+            LinearGradient(
+              colors: [
+                AppTheme.deviceEdgeHighlight,
+                AppTheme.deviceEdge,
+                AppTheme.deviceEdgeShadow,
+              ],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
+          .frame(width: size.width, height: size.height)
+          .offset(
+            x: depthOffset.width * progress,
+            y: depthOffset.height * progress
+          )
+      }
+    }
+    .allowsHitTesting(false)
   }
 }
 
@@ -838,7 +926,7 @@ private struct EditorControlPanel: View {
           }
         }
 
-        Text("也可以直接拖动画面定位，或用双指缩放。")
+        Text("拖动画面可定位并查看机身立体效果，也可以用双指缩放。")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -1450,6 +1538,9 @@ private enum AppTheme {
         : UIColor(red: 0.91, green: 0.86, blue: 0.78, alpha: 1)
     })
   static let deviceShell = Color(red: 0.84, green: 0.88, blue: 0.84)
+  static let deviceEdgeHighlight = Color(red: 0.72, green: 0.77, blue: 0.73)
+  static let deviceEdge = Color(red: 0.60, green: 0.65, blue: 0.61)
+  static let deviceEdgeShadow = Color(red: 0.47, green: 0.52, blue: 0.48)
   static let paper = Color(red: 0.92, green: 0.91, blue: 0.86)
   static let eInkBlack = Color(red: 0.08, green: 0.08, blue: 0.075)
   static let eInkRed = Color(red: 0.67, green: 0.27, blue: 0.20)

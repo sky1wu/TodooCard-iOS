@@ -3,8 +3,10 @@ import Foundation
 public enum CardPhysicalSize {
     public static let widthMillimeters = 62.0
     public static let heightMillimeters = 97.5
+    public static let thicknessMillimeters = 3.0
     public static let cornerRadiusMillimeters = 5.5
     public static let aspectRatio = widthMillimeters / heightMillimeters
+    public static let thicknessToWidthRatio = thicknessMillimeters / widthMillimeters
     public static let cornerRadiusToWidthRatio = cornerRadiusMillimeters / widthMillimeters
 }
 
