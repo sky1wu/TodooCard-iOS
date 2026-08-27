@@ -126,28 +126,16 @@ struct ContentView: View {
 
   private var welcomeView: some View {
     ScrollView(showsIndicators: false) {
-      VStack(spacing: 28) {
+      VStack(spacing: 22) {
         HomeHeroArtwork()
           .frame(height: horizontalSizeClass == .regular ? 330 : 252)
           .accessibilityHidden(true)
-
-        VStack(spacing: 9) {
-          Text("把喜欢的画面，留在卡片上")
-            .font(.system(.largeTitle, design: .rounded, weight: .bold))
-            .multilineTextAlignment(.center)
-
-          Text("在 iPhone 上完成裁切与六色优化，\n再安全发送到 TodooCard。")
-            .font(.body)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .lineSpacing(3)
-        }
 
         VStack(spacing: 12) {
           Button {
             showPhotoPicker = true
           } label: {
-            Label("从照片开始", systemImage: "photo.on.rectangle.angled")
+            Label("选择照片", systemImage: "photo.on.rectangle.angled")
               .font(.headline)
               .frame(maxWidth: .infinity)
               .frame(minHeight: 54)
@@ -169,7 +157,7 @@ struct ContentView: View {
           ConnectedCallout(bluetooth: bluetooth, disconnect: bluetooth.disconnect)
         }
 
-        PrivacyCallout()
+        PrivacyNote()
       }
       .frame(maxWidth: 560)
       .padding(.horizontal, 20)
@@ -451,30 +439,12 @@ private struct ImportOptionButton: View {
   }
 }
 
-private struct PrivacyCallout: View {
+private struct PrivacyNote: View {
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      Image(systemName: "lock.shield.fill")
-        .font(.title3)
-        .foregroundStyle(AppTheme.accent)
-        .frame(width: 24)
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text("图片始终留在这台 iPhone 上")
-          .font(.subheadline.weight(.semibold))
-        Text("裁切、六色处理与传输数据都在本机完成，不会上传到服务器。")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(16)
-    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .stroke(AppTheme.hairline, lineWidth: 0.5)
-    }
+    Label("图片仅在本机处理", systemImage: "lock.fill")
+      .font(.caption.weight(.medium))
+      .foregroundStyle(.secondary)
+      .padding(.top, 2)
   }
 }
 
@@ -1155,16 +1125,7 @@ private struct DeviceRow: View {
   var body: some View {
     Button(action: action) {
       HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(AppTheme.deviceShell)
-            .frame(width: 38, height: 54)
-          RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(AppTheme.eInkGreen.opacity(0.7))
-            .frame(width: 29, height: 35)
-            .offset(y: -5)
-        }
-        .shadow(color: AppTheme.shadow.opacity(0.5), radius: 5, y: 3)
+        MiniCardDeviceIcon()
 
         VStack(alignment: .leading, spacing: 5) {
           Text(device.name)
@@ -1209,6 +1170,34 @@ private struct DeviceRow: View {
     if device.rssi >= -60 { return "信号很好" }
     if device.rssi >= -75 { return "信号良好" }
     return "信号较弱"
+  }
+}
+
+private struct MiniCardDeviceIcon: View {
+  private let width: CGFloat = 39
+  private let height: CGFloat = 63
+
+  var body: some View {
+    ZStack(alignment: .top) {
+      RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+        .fill(AppTheme.deviceShell)
+
+      ScreenArtwork()
+        .frame(width: 32, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 2.2, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 2.2, style: .continuous)
+            .stroke(Color.black.opacity(0.18), lineWidth: 0.5)
+        }
+        .padding(.top, 4.2)
+    }
+    .frame(width: width, height: height)
+    .overlay {
+      RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+        .stroke(Color.white.opacity(0.7), lineWidth: 0.7)
+    }
+    .shadow(color: AppTheme.shadow.opacity(0.55), radius: 5, y: 3)
+    .accessibilityHidden(true)
   }
 }
 
