@@ -98,7 +98,7 @@ final class EditorModel: ObservableObject {
               magnification.isFinite,
               magnification > 0 else { return }
 
-        zoom = min(4, max(1, zoom * magnification))
+        let proposedZoom = min(4, max(1, zoom * magnification))
         guard
               let layout = try? computeCoverLayout(
                 sourceWidth: image.size.width,
@@ -106,18 +106,29 @@ final class EditorModel: ObservableObject {
                 rotation: rotation,
                 focusX: focusX,
                 focusY: focusY,
-                zoom: zoom
+                zoom: proposedZoom
               )
         else { return }
 
+        var proposedFocusX = focusX
+        var proposedFocusY = focusY
         let targetDeltaX = Double(translation.width / viewport.width) * Double(CardDisplay.width)
         let targetDeltaY = Double(translation.height / viewport.height) * Double(CardDisplay.height)
         if layout.overflowX > 0 {
-            focusX = min(100, max(0, (layout.cropX - targetDeltaX) / layout.overflowX * 100))
+            proposedFocusX = min(100, max(0, (layout.cropX - targetDeltaX) / layout.overflowX * 100))
         }
         if layout.overflowY > 0 {
-            focusY = min(100, max(0, (layout.cropY - targetDeltaY) / layout.overflowY * 100))
+            proposedFocusY = min(100, max(0, (layout.cropY - targetDeltaY) / layout.overflowY * 100))
         }
+
+        let changed = abs(proposedZoom - zoom) > 0.001
+            || abs(proposedFocusX - focusX) > 0.001
+            || abs(proposedFocusY - focusY) > 0.001
+        guard changed else { return }
+
+        zoom = proposedZoom
+        focusX = proposedFocusX
+        focusY = proposedFocusY
         scheduleProcessing()
     }
 

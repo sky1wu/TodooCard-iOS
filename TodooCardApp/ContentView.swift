@@ -202,7 +202,7 @@ struct ContentView: View {
     private var sendBar: some View {
         Button(action: primaryAction) {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(sendButtonBackground)
 
                 if bluetooth.isSending {
@@ -211,23 +211,23 @@ struct ContentView: View {
                             .fill(Color.white.opacity(0.2))
                             .frame(width: proxy.size.width * min(1, max(0, bluetooth.progress)))
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .animation(.linear(duration: 0.15), value: bluetooth.progress)
                 }
 
-                HStack(spacing: 11) {
+                HStack(spacing: 9) {
                     sendButtonIcon
-                        .frame(width: 24, height: 24)
+                        .frame(width: 20, height: 20)
 
                     Text(primaryButtonLabel)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
 
                     if bluetooth.isSending {
                         Text(bluetooth.progress, format: .percent.precision(.fractionLength(0)))
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .font(.caption.monospacedDigit().weight(.semibold))
                     } else if !bluetooth.isBusy && bluetooth.isConnected {
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.bold))
@@ -235,18 +235,18 @@ struct ContentView: View {
                     }
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 15)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
+            .frame(height: 46)
             .overlay {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
             }
             .shadow(
                 color: sendButtonEnabled ? Color.accentColor.opacity(0.28) : .clear,
-                radius: 12,
-                y: 5
+                radius: 8,
+                y: 3
             )
             .opacity(sendButtonEnabled || bluetooth.isBusy ? 1 : 0.55)
         }
@@ -257,9 +257,9 @@ struct ContentView: View {
                 ? bluetooth.progress.formatted(.percent.precision(.fractionLength(0)))
                 : ""
         )
-        .padding(.horizontal, 18)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
         .background(.ultraThinMaterial)
     }
 
@@ -309,7 +309,7 @@ struct ContentView: View {
                     ? "paperplane.fill"
                     : "antenna.radiowaves.left.and.right"
             )
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
         }
     }
 

@@ -36,6 +36,17 @@ enum ImageProcessorError: Error, LocalizedError {
 }
 
 enum ImageProcessor {
+    // Keep protocol colors untouched while making the on-phone preview resemble
+    // the darker, narrower gamut of the physical six-color e-paper panel.
+    private static let panelPreviewPalette: [UInt8: (red: UInt8, green: UInt8, blue: UInt8)] = [
+        0: (31, 34, 38),
+        1: (185, 199, 201),
+        2: (193, 187, 30),
+        3: (98, 32, 30),
+        5: (35, 63, 142),
+        6: (53, 86, 58),
+    ]
+
     static func process(_ request: ImageProcessingRequest) throws -> ImageProcessingResult {
         let rendered = try renderCover(request)
         let rgba = try rgbaBytes(from: rendered)
@@ -139,9 +150,8 @@ enum ImageProcessor {
 
     private static func previewImage(from codes: [UInt8]) throws -> UIImage {
         var rgba = [UInt8](repeating: 255, count: codes.count * 4)
-        let palette = Dictionary(uniqueKeysWithValues: nativePalette.map { ($0.code, $0) })
         for (index, code) in codes.enumerated() {
-            guard let color = palette[code] else { continue }
+            guard let color = panelPreviewPalette[code] else { continue }
             let offset = index * 4
             rgba[offset] = color.red
             rgba[offset + 1] = color.green
@@ -149,13 +159,14 @@ enum ImageProcessor {
         }
         let data = Data(rgba) as CFData
         guard let provider = CGDataProvider(data: data),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let image = CGImage(
                 width: CardDisplay.width,
                 height: CardDisplay.height,
                 bitsPerComponent: 8,
                 bitsPerPixel: 32,
                 bytesPerRow: CardDisplay.width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: colorSpace,
                 bitmapInfo: CGBitmapInfo(
                     rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
                         | CGBitmapInfo.byteOrder32Big.rawValue
