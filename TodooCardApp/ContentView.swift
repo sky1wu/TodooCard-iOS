@@ -7,6 +7,11 @@ import UniformTypeIdentifiers
   import TodooCore
 #endif
 
+private enum DevicePickerPurpose {
+  case connectAndSend
+  case changeConnection
+}
+
 struct ContentView: View {
   @StateObject private var editor = EditorModel()
   @StateObject private var bluetooth = TodooBluetoothManager.shared
@@ -18,6 +23,9 @@ struct ContentView: View {
   @State private var showDevicePicker = false
   @State private var showDiagnostics = false
   @State private var showRemoveConfirmation = false
+  @State private var showRenameDevice = false
+  @State private var deviceNameDraft = ""
+  @State private var devicePickerPurpose = DevicePickerPurpose.connectAndSend
   @State private var isImporting = false
 
   var body: some View {
@@ -40,6 +48,8 @@ struct ContentView: View {
             editor: editor,
             bluetooth: bluetooth,
             primaryAction: primaryAction,
+            renameDevice: beginRenamingDevice,
+            changeDevice: { presentDevicePicker(for: .changeConnection) },
             disconnect: bluetooth.disconnect
           )
         }
@@ -61,9 +71,14 @@ struct ContentView: View {
     }
     .sheet(isPresented: $showDevicePicker, onDismiss: bluetooth.stopDiscovery) {
       DevicePicker(bluetooth: bluetooth) { device in
-        guard let payload = editor.payload else { return }
         showDevicePicker = false
-        bluetooth.connectAndSend(deviceID: device.id, payload: payload)
+        switch devicePickerPurpose {
+        case .connectAndSend:
+          guard let payload = editor.payload else { return }
+          bluetooth.connectAndSend(deviceID: device.id, payload: payload)
+        case .changeConnection:
+          bluetooth.connect(deviceID: device.id)
+        }
       }
       .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
@@ -79,6 +94,16 @@ struct ContentView: View {
       Button("知道了", role: .cancel) { clearErrors() }
     } message: {
       Text(editor.errorMessage ?? bluetooth.errorMessage ?? "发生了未知错误。")
+    }
+    .alert("重命名设备", isPresented: $showRenameDevice) {
+      TextField("设备名称", text: $deviceNameDraft)
+      Button("取消", role: .cancel) {}
+      Button("保存") {
+        bluetooth.renameCurrentDevice(to: deviceNameDraft)
+      }
+      .disabled(deviceNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    } message: {
+      Text("最多 24 个字符；名称仅保存在此 iPhone，不会修改设备固件或系统蓝牙名称。")
     }
     .confirmationDialog(
       "重新开始？",
@@ -153,9 +178,12 @@ struct ContentView: View {
           }
         }
 
-        if bluetooth.isConnected {
-          ConnectedCallout(bluetooth: bluetooth, disconnect: bluetooth.disconnect)
-        }
+        DeviceConnectionCallout(
+          bluetooth: bluetooth,
+          renameDevice: beginRenamingDevice,
+          changeDevice: { presentDevicePicker(for: .changeConnection) },
+          disconnect: bluetooth.disconnect
+        )
 
         PrivacyNote()
       }
@@ -238,12 +266,19 @@ struct ContentView: View {
 
   private func primaryAction() {
     guard let payload = editor.payload else { return }
-    if bluetooth.isConnected {
-      bluetooth.send(payload)
-    } else {
-      bluetooth.beginDiscovery()
-      if bluetooth.errorMessage == nil { showDevicePicker = true }
-    }
+    if bluetooth.sendToCurrentDevice(payload) { return }
+    presentDevicePicker(for: .connectAndSend)
+  }
+
+  private func presentDevicePicker(for purpose: DevicePickerPurpose) {
+    devicePickerPurpose = purpose
+    bluetooth.beginDiscovery()
+    if bluetooth.errorMessage == nil { showDevicePicker = true }
+  }
+
+  private func beginRenamingDevice() {
+    deviceNameDraft = bluetooth.connectedDeviceName ?? "TodooCard"
+    showRenameDevice = true
   }
 
   @MainActor
@@ -449,34 +484,88 @@ private struct PrivacyNote: View {
   }
 }
 
-private struct ConnectedCallout: View {
+private struct DeviceConnectionCallout: View {
   @ObservedObject var bluetooth: TodooBluetoothManager
+  let renameDevice: () -> Void
+  let changeDevice: () -> Void
   let disconnect: () -> Void
 
   var body: some View {
     HStack(spacing: 12) {
       ZStack {
-        Circle().fill(AppTheme.success.opacity(0.14))
-        Image(systemName: "checkmark")
-          .font(.caption.bold())
-          .foregroundStyle(AppTheme.success)
+        Circle().fill(statusColor.opacity(0.14))
+        if bluetooth.isConnecting {
+          ProgressView()
+            .controlSize(.small)
+            .tint(statusColor)
+        } else {
+          Image(systemName: bluetooth.isConnected ? "checkmark" : "bolt.horizontal")
+            .font(.caption.bold())
+            .foregroundStyle(statusColor)
+        }
       }
       .frame(width: 34, height: 34)
 
       VStack(alignment: .leading, spacing: 2) {
-        Text(bluetooth.connectedDeviceName ?? "TodooCard")
+        Text(statusTitle)
           .font(.subheadline.weight(.semibold))
-        Text(bluetooth.batteryLevel.map { "已安全连接 · 电量 \($0)%" } ?? "已安全连接")
+          .lineLimit(1)
+        Text(statusSubtitle)
           .font(.caption)
           .foregroundStyle(.secondary)
+          .lineLimit(1)
       }
 
       Spacer()
-      Button("断开", role: .destructive, action: disconnect)
-        .font(.caption.weight(.semibold))
+      if bluetooth.hasCurrentDevice {
+        Menu {
+          Button(action: renameDevice) {
+            Label("重命名设备", systemImage: "pencil")
+          }
+          Button(action: changeDevice) {
+            Label("更改连接设备", systemImage: "arrow.triangle.2.circlepath")
+          }
+          Button(role: .destructive, action: disconnect) {
+            Label("断开连接", systemImage: "xmark.circle")
+          }
+        } label: {
+          Image(systemName: "ellipsis")
+            .frame(width: 34, height: 34)
+            .background(AppTheme.controlFill, in: Circle())
+        }
+        .accessibilityLabel("设备连接选项")
+      } else {
+        Button("连接", action: changeDevice)
+          .font(.caption.weight(.semibold))
+      }
     }
     .padding(14)
     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+
+  private var statusColor: Color {
+    if bluetooth.isConnected { return AppTheme.success }
+    if bluetooth.isConnecting { return AppTheme.accent }
+    return .secondary
+  }
+
+  private var statusTitle: String {
+    if bluetooth.hasCurrentDevice {
+      return bluetooth.connectedDeviceName ?? "TodooCard"
+    }
+    return "设备未连接"
+  }
+
+  private var statusSubtitle: String {
+    if bluetooth.isConnecting { return bluetooth.statusText }
+    if bluetooth.isConnected {
+      return bluetooth.batteryLevel.map { "已安全连接 · 电量 \($0)%" } ?? "已安全连接"
+    }
+    if bluetooth.hasCurrentDevice {
+      return bluetooth.statusText == "未连接" ? "等待重新连接" : bluetooth.statusText
+    }
+    if bluetooth.statusText != "未连接" { return bluetooth.statusText }
+    return "选择图片后即可连接 TodooCard"
   }
 }
 
@@ -776,6 +865,8 @@ private struct TransferDock: View {
   @ObservedObject var editor: EditorModel
   @ObservedObject var bluetooth: TodooBluetoothManager
   let primaryAction: () -> Void
+  let renameDevice: () -> Void
+  let changeDevice: () -> Void
   let disconnect: () -> Void
 
   var body: some View {
@@ -795,9 +886,17 @@ private struct TransferDock: View {
 
         Spacer(minLength: 8)
 
-        if bluetooth.isConnected && !bluetooth.isBusy {
+        if bluetooth.hasCurrentDevice && !bluetooth.isBusy {
           Menu {
-            Button("断开连接", role: .destructive, action: disconnect)
+            Button(action: renameDevice) {
+              Label("重命名设备", systemImage: "pencil")
+            }
+            Button(action: changeDevice) {
+              Label("更改连接设备", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button(role: .destructive, action: disconnect) {
+              Label("断开连接", systemImage: "xmark.circle")
+            }
           } label: {
             Image(systemName: "ellipsis")
               .frame(width: 34, height: 34)
@@ -871,12 +970,14 @@ private struct TransferDock: View {
   private var connectionState: StatusMark.State {
     if bluetooth.isBusy { return .working }
     if bluetooth.isConnected { return .connected }
+    if bluetooth.isConnecting { return .working }
     return .idle
   }
 
   private var statusTitle: String {
     if bluetooth.isBusy { return bluetooth.statusText }
     if bluetooth.isConnected { return bluetooth.connectedDeviceName ?? "TodooCard" }
+    if bluetooth.hasCurrentDevice { return bluetooth.connectedDeviceName ?? "TodooCard" }
     return "准备发送"
   }
 
@@ -890,6 +991,9 @@ private struct TransferDock: View {
       }
       return bluetooth.batteryLevel.map { "安全连接 · 电量 \($0)%" } ?? "安全连接已就绪"
     }
+    if bluetooth.hasCurrentDevice {
+      return bluetooth.isConnecting ? bluetooth.statusText : "发送时将自动连接当前设备"
+    }
     return "下一步将查找附近的 TodooCard"
   }
 
@@ -897,7 +1001,7 @@ private struct TransferDock: View {
     if bluetooth.isSending { return "正在发送" }
     if bluetooth.isBusy { return bluetooth.statusText }
     if editor.isProcessing { return "正在准备图片" }
-    return bluetooth.isConnected ? "发送到卡片" : "选择设备并发送"
+    return bluetooth.hasCurrentDevice ? "发送到当前设备" : "选择设备并发送"
   }
 
   private var buttonEnabled: Bool {
@@ -991,7 +1095,8 @@ private struct DiagnosticsView: View {
         }
 
         Section("设备") {
-          LabeledContent("连接", value: bluetooth.connectedDeviceName ?? "未连接")
+          LabeledContent("当前设备", value: bluetooth.connectedDeviceName ?? "未选择")
+          LabeledContent("连接", value: connectionDescription)
           LabeledContent("电量", value: bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
           LabeledContent(
             "快捷指令设备",
@@ -1042,6 +1147,12 @@ private struct DiagnosticsView: View {
     return "antenna.radiowaves.left.and.right"
   }
 
+  private var connectionDescription: String {
+    if bluetooth.isConnected { return "已连接" }
+    if bluetooth.isConnecting { return "正在连接" }
+    return "未连接"
+  }
+
   private var report: String {
     let version =
       Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1087,7 +1198,10 @@ private struct DevicePicker: View {
           } else {
             VStack(spacing: 10) {
               ForEach(bluetooth.devices) { device in
-                DeviceRow(device: device) { onSelect(device) }
+                DeviceRow(
+                  device: device,
+                  isCurrent: bluetooth.currentDeviceIdentifier == device.id
+                ) { onSelect(device) }
               }
             }
           }
@@ -1177,6 +1291,7 @@ private struct ScanHeader: View {
 
 private struct DeviceRow: View {
   let device: DiscoveredCard
+  let isCurrent: Bool
   let action: () -> Void
 
   var body: some View {
@@ -1200,6 +1315,10 @@ private struct DeviceRow: View {
             Label("请先在系统蓝牙中完成配对", systemImage: "exclamationmark.circle.fill")
               .font(.caption.weight(.medium))
               .foregroundStyle(.orange)
+          } else if isCurrent {
+            Label("当前设备", systemImage: "checkmark.circle.fill")
+              .font(.caption.weight(.medium))
+              .foregroundStyle(AppTheme.success)
           }
         }
 
@@ -1220,7 +1339,7 @@ private struct DeviceRow: View {
     .buttonStyle(.plain)
     .disabled(device.pairingWindowOpen)
     .opacity(device.pairingWindowOpen ? 0.72 : 1)
-    .accessibilityHint(device.pairingWindowOpen ? "需要先完成系统配对" : "连接并发送图片")
+    .accessibilityHint(device.pairingWindowOpen ? "需要先完成系统配对" : "选择并连接此设备")
   }
 
   private var signalLabel: String {

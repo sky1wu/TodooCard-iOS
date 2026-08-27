@@ -31,10 +31,16 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     @Published private(set) var logs: [String] = []
     @Published var errorMessage: String?
 
-    var isBusy: Bool { isConnecting || isPreparingTransfer || isSending }
+    var isBusy: Bool { isPreparingTransfer || isSending }
+    var hasCurrentDevice: Bool { currentDeviceIdentifier != nil }
+    var currentDeviceIdentifier: UUID? {
+        activePeripheral?.identifier ?? persistedCurrentDeviceIdentifier
+    }
     var rememberedAutomationDeviceName: String? {
-        guard preferredDeviceIdentifier != nil else { return nil }
-        return UserDefaults.standard.string(forKey: Self.preferredDeviceNameKey) ?? "TodooCard"
+        guard let identifier = preferredDeviceIdentifier else { return nil }
+        return deviceAlias(for: identifier)
+            ?? UserDefaults.standard.string(forKey: Self.preferredDeviceNameKey)
+            ?? "TodooCard"
     }
 
     private enum Phase: Equatable {
@@ -63,6 +69,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var selectedProfile: TransferProfile?
     private var pendingPayload: Data?
     private var automaticSendPayload: Data?
+    private var isFindingCurrentDevice = false
     private var pendingControlWrite: PendingControlWrite?
     private var phase = Phase.idle
 
@@ -103,6 +110,10 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     private static let preferredDeviceIdentifierKey = "TodooCard.preferredDeviceIdentifier"
     private static let preferredDeviceNameKey = "TodooCard.preferredDeviceName"
+    private static let currentDeviceIdentifierKey = "TodooCard.currentDeviceIdentifier"
+    private static let currentDeviceNameKey = "TodooCard.currentDeviceName"
+    private static let deviceAliasesKey = "TodooCard.deviceAliases"
+    private static let centralRestoreIdentifier = "com.todoocard.sender.central"
     private static var automaticTransferOwner: ObjectIdentifier?
 
     private var preferredDeviceIdentifier: UUID? {
@@ -111,13 +122,31 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         return UUID(uuidString: value)
     }
 
+    private var persistedCurrentDeviceIdentifier: UUID? {
+        guard let value = UserDefaults.standard.string(forKey: Self.currentDeviceIdentifierKey)
+        else { return nil }
+        return UUID(uuidString: value)
+    }
+
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+        if let identifier = persistedCurrentDeviceIdentifier {
+            shouldMaintainConnection = true
+            connectedDeviceName = resolvedDeviceName(
+                for: identifier,
+                fallback: UserDefaults.standard.string(forKey: Self.currentDeviceNameKey)
+            )
+        }
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: Self.centralRestoreIdentifier]
+        )
     }
 
     func beginDiscovery() {
         automaticSendPayload = nil
+        isFindingCurrentDevice = false
         isPreparingTransfer = false
         startDiscovery()
     }
@@ -209,7 +238,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         peripherals = [:]
         advertisements = [:]
         isScanning = true
-        statusText = "正在查找 TodooCard…"
+        if !isConnected { statusText = "正在查找 TodooCard…" }
         appendLog("开始扫描厂商 0x5053、屏幕 0x134C。")
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         scanTask?.cancel()
@@ -223,10 +252,19 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
                 self.fail("没有找到上次成功使用的 TodooCard。请确认卡片已开机并靠近 iPhone。")
                 return
             }
+            if self.isFindingCurrentDevice {
+                self.isFindingCurrentDevice = false
+                self.pendingPayload = nil
+                self.isPreparingTransfer = false
+                self.statusText = "未找到 \(self.connectedDeviceName ?? "当前设备")"
+                self.errorMessage = "没有找到当前设备。请确认卡片已开机并靠近 iPhone，或更改连接设备。"
+                self.appendLog("扫描结束，未找到当前设备。")
+                return
+            }
             if self.devices.isEmpty {
-                self.statusText = "没有找到兼容设备"
+                if !self.isConnected { self.statusText = "没有找到兼容设备" }
                 self.appendLog("扫描结束，未发现兼容广播。")
-            } else {
+            } else if !self.isConnected {
                 self.statusText = "请选择设备"
             }
         }
@@ -250,18 +288,50 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         connectAndSend(peripheral: peripheral, payload: payload)
     }
 
+    func connect(deviceID: UUID) {
+        guard let peripheral = peripherals[deviceID], let advertisement = advertisements[deviceID] else {
+            fail("选中的设备已离开扫描范围，请重新扫描。")
+            return
+        }
+        guard !advertisement.pairingWindowOpen else {
+            fail("设备广播显示 pairing=open。请先在系统蓝牙设置中完成绑定，等待配对窗口关闭后再试。")
+            return
+        }
+        connect(peripheral: peripheral, payload: nil)
+    }
+
     private func connectAndSend(peripheral: CBPeripheral, payload: Data) {
+        connect(peripheral: peripheral, payload: payload)
+    }
+
+    private func connect(peripheral: CBPeripheral, payload: Data?) {
         stopDiscovery()
+        if let activePeripheral,
+           activePeripheral.identifier != peripheral.identifier {
+            appendLog(
+                "切换设备：\(activePeripheral.identifier.uuidString) -> \(peripheral.identifier.uuidString)"
+            )
+            shouldMaintainConnection = false
+            central.cancelPeripheralConnection(activePeripheral)
+            clearConnection()
+        }
+
         pendingPayload = payload
         progress = 0
         errorMessage = nil
-        isPreparingTransfer = true
+        isPreparingTransfer = payload != nil
         shouldMaintainConnection = true
         reconnectAttempts = 0
         transferConnectionRecoveryAttempts = 0
         reconnectingForTransfer = false
+        activePeripheral = peripheral
+        peripheral.delegate = self
+        persistCurrentDevice(
+            identifier: peripheral.identifier,
+            name: resolvedDeviceName(for: peripheral.identifier, fallback: peripheral.name)
+        )
 
-        if peripheral.state == .connected, activePeripheral?.identifier == peripheral.identifier {
+        if peripheral.state == .connected, isConnected {
             isConnecting = !isConnected
             startTransferIfReady()
             return
@@ -269,12 +339,53 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
         reconnectTask?.cancel()
         resetConnectionDiscovery()
-        activePeripheral = peripheral
-        peripheral.delegate = self
         isConnecting = true
-        statusText = "正在连接 \(peripheral.name ?? "TodooCard")…"
+        statusText = "正在连接 \(connectedDeviceName ?? "TodooCard")…"
         appendLog("连接 -> \(peripheral.identifier.uuidString)")
-        central.connect(peripheral, options: nil)
+        switch peripheral.state {
+        case .connected:
+            peripheral.discoverServices(nil)
+        case .connecting:
+            appendLog("CoreBluetooth 已在连接当前设备；发送任务已排队。")
+        case .disconnecting:
+            appendLog("等待当前设备断开完成后自动恢复连接。")
+        case .disconnected:
+            central.connect(peripheral, options: nil)
+        @unknown default:
+            central.connect(peripheral, options: nil)
+        }
+    }
+
+    @discardableResult
+    func sendToCurrentDevice(_ payload: Data) -> Bool {
+        guard let identifier = currentDeviceIdentifier else { return false }
+        if isConnected,
+           let activePeripheral,
+           activePeripheral.identifier == identifier,
+           activePeripheral.state == .connected {
+            send(payload)
+            return true
+        }
+        if let activePeripheral, activePeripheral.identifier == identifier {
+            connectAndSend(peripheral: activePeripheral, payload: payload)
+            return true
+        }
+        guard central.state == .poweredOn else {
+            fail("请先在系统设置中打开蓝牙，并允许 TodooCard 使用蓝牙。")
+            return true
+        }
+        if let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first {
+            appendLog("恢复当前设备并继续发送。")
+            connectAndSend(peripheral: peripheral, payload: payload)
+            return true
+        }
+        pendingPayload = payload
+        isPreparingTransfer = true
+        isFindingCurrentDevice = true
+        appendLog("系统缓存中没有当前设备；扫描并自动恢复当前设备。")
+        startDiscovery()
+        statusText = "正在查找 \(connectedDeviceName ?? "当前设备")…"
+        return true
     }
 
     func send(_ payload: Data) {
@@ -315,6 +426,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             central.cancelPeripheralConnection(activePeripheral)
         }
         clearConnection()
+        clearPersistedCurrentDevice()
         statusText = "已断开连接"
         finishAutomaticTransfer(
             .failure(AutomaticUpdateError.transferFailed("后台自动发送已取消。"))
@@ -353,7 +465,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isSending = false
         reconnectingForTransfer = false
         transferConnectionRecoveryAttempts = 0
-        connectedDeviceName = nil
+        isFindingCurrentDevice = false
         pendingPayload = nil
     }
 
@@ -733,6 +845,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     private func rememberActiveDevice() {
         guard let peripheral = activePeripheral else { return }
+        let changed = preferredDeviceIdentifier != peripheral.identifier
         UserDefaults.standard.set(
             peripheral.identifier.uuidString,
             forKey: Self.preferredDeviceIdentifierKey
@@ -741,11 +854,69 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             connectedDeviceName ?? peripheral.name ?? "TodooCard",
             forKey: Self.preferredDeviceNameKey
         )
-        appendLog("已记住此设备，后续快捷指令可自动连接。")
+        if changed { appendLog("已将当前设备设为后续发送与快捷指令的默认设备。") }
+    }
+
+    func renameCurrentDevice(to name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = String(trimmedName.prefix(24))
+        guard !normalizedName.isEmpty, let identifier = currentDeviceIdentifier else { return }
+
+        var aliases = deviceAliases
+        aliases[identifier.uuidString] = normalizedName
+        UserDefaults.standard.set(aliases, forKey: Self.deviceAliasesKey)
+        UserDefaults.standard.set(normalizedName, forKey: Self.currentDeviceNameKey)
+        if preferredDeviceIdentifier == identifier {
+            UserDefaults.standard.set(normalizedName, forKey: Self.preferredDeviceNameKey)
+        }
+        connectedDeviceName = normalizedName
+        if let index = devices.firstIndex(where: { $0.id == identifier }) {
+            let device = devices[index]
+            devices[index] = DiscoveredCard(
+                id: device.id,
+                name: normalizedName,
+                rssi: device.rssi,
+                firmwareVersion: device.firmwareVersion,
+                pairingWindowOpen: device.pairingWindowOpen,
+                rawAdvertisement: device.rawAdvertisement
+            )
+        }
+        if isConnected, !isBusy {
+            statusText = "已连接到 \(normalizedName)"
+        }
+        appendLog("当前设备已在本机重命名为“\(normalizedName)”。")
+    }
+
+    private var deviceAliases: [String: String] {
+        UserDefaults.standard.dictionary(forKey: Self.deviceAliasesKey) as? [String: String] ?? [:]
+    }
+
+    private func deviceAlias(for identifier: UUID) -> String? {
+        deviceAliases[identifier.uuidString]
+    }
+
+    private func resolvedDeviceName(for identifier: UUID, fallback: String?) -> String {
+        deviceAlias(for: identifier) ?? fallback ?? "TodooCard"
+    }
+
+    private func persistCurrentDevice(identifier: UUID, name: String) {
+        UserDefaults.standard.set(
+            identifier.uuidString,
+            forKey: Self.currentDeviceIdentifierKey
+        )
+        UserDefaults.standard.set(name, forKey: Self.currentDeviceNameKey)
+        connectedDeviceName = name
+    }
+
+    private func clearPersistedCurrentDevice() {
+        UserDefaults.standard.removeObject(forKey: Self.currentDeviceIdentifierKey)
+        UserDefaults.standard.removeObject(forKey: Self.currentDeviceNameKey)
+        connectedDeviceName = nil
     }
 
     private func fail(_ message: String) {
         let unreadyPeripheral = isConnecting && !isConnected ? activePeripheral : nil
+        var peripheralToRetry: CBPeripheral?
         windowTask?.cancel()
         deadlineTask?.cancel()
         controlFallbackTask?.cancel()
@@ -753,6 +924,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         handshakeTask?.cancel()
         pendingControlWrite = nil
         automaticSendPayload = nil
+        isFindingCurrentDevice = false
         pendingPayload = nil
         phase = .idle
         isSending = false
@@ -762,13 +934,25 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         transferConnectionRecoveryAttempts = 0
         handshakeScheduled = false
         if let unreadyPeripheral {
-            shouldMaintainConnection = false
-            central.cancelPeripheralConnection(unreadyPeripheral)
-            clearConnection()
+            let wasEstablishedDevice = preferredDeviceIdentifier == unreadyPeripheral.identifier
+                && persistedCurrentDeviceIdentifier == unreadyPeripheral.identifier
+            if wasEstablishedDevice, shouldMaintainConnection {
+                resetConnectionDiscovery()
+                appendLog("当前设备会话初始化失败；保留设备并等待自动重连。")
+                central.cancelPeripheralConnection(unreadyPeripheral)
+                peripheralToRetry = unreadyPeripheral
+            } else {
+                shouldMaintainConnection = false
+                central.cancelPeripheralConnection(unreadyPeripheral)
+                clearConnection()
+            }
         }
         statusText = "操作失败"
         errorMessage = message
         appendLog("错误：\(message)")
+        if let peripheralToRetry {
+            scheduleReconnect(to: peripheralToRetry, delayNanoseconds: 1_200_000_000)
+        }
         finishAutomaticTransfer(.failure(AutomaticUpdateError.transferFailed(message)))
     }
 
@@ -835,21 +1019,19 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     private func scheduleReconnect(to peripheral: CBPeripheral, delayNanoseconds: UInt64 = 800_000_000) {
         guard shouldMaintainConnection, central.state == .poweredOn else { return }
-        guard reconnectAttempts < 4 else {
-            shouldMaintainConnection = false
-            fail("无法恢复与 TodooCard 的连接，请确认卡片已开机后重试。")
-            return
-        }
 
         reconnectTask?.cancel()
-        reconnectAttempts += 1
+        reconnectAttempts = min(reconnectAttempts + 1, 1_000)
         let attempt = reconnectAttempts
+        let backoffMultiplier = 1 << min(max(0, attempt - 1), 5)
+        let backoffNanoseconds = UInt64(backoffMultiplier) * 800_000_000
+        let effectiveDelay = min(30_000_000_000, max(delayNanoseconds, backoffNanoseconds))
         isConnecting = true
         isConnected = false
         statusText = "正在恢复连接…"
-        appendLog("将在 \(Double(delayNanoseconds) / 1_000_000_000) 秒后恢复连接（\(attempt)/4）。")
+        appendLog("将在 \(Double(effectiveDelay) / 1_000_000_000) 秒后恢复连接（第 \(attempt) 次）。")
         reconnectTask = Task { [weak self, weak peripheral] in
-            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            try? await Task.sleep(nanoseconds: effectiveDelay)
             guard !Task.isCancelled, let self, let peripheral,
                   self.shouldMaintainConnection,
                   self.central.state == .poweredOn,
@@ -869,8 +1051,26 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
                 resumeAutomaticSend()
                 return
             }
+            if shouldMaintainConnection,
+               activePeripheral == nil,
+               let identifier = persistedCurrentDeviceIdentifier,
+               let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first {
+                appendLog("App 恢复当前设备 -> \(identifier.uuidString)")
+                connect(peripheral: peripheral, payload: nil)
+                return
+            }
+            if shouldMaintainConnection,
+               let activePeripheral,
+               activePeripheral.state == .connected,
+               !isConnected {
+                resetConnectionDiscovery()
+                isConnecting = true
+                appendLog("恢复已存在的 CoreBluetooth 链路；重新验证 GATT 会话。")
+                activePeripheral.discoverServices(nil)
+                return
+            }
             if shouldMaintainConnection, let activePeripheral,
-               activePeripheral.state != .connected {
+               activePeripheral.state == .disconnected {
                 scheduleReconnect(to: activePeripheral, delayNanoseconds: 0)
             }
         case .poweredOff:
@@ -904,6 +1104,22 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         }
     }
 
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        guard let identifier = persistedCurrentDeviceIdentifier,
+              let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
+              let peripheral = peripherals.first(where: { $0.identifier == identifier }) else { return }
+        activePeripheral = peripheral
+        peripheral.delegate = self
+        shouldMaintainConnection = true
+        isConnecting = true
+        connectedDeviceName = resolvedDeviceName(
+            for: identifier,
+            fallback: UserDefaults.standard.string(forKey: Self.currentDeviceNameKey) ?? peripheral.name
+        )
+        statusText = "正在恢复与 \(connectedDeviceName ?? "TodooCard") 的连接…"
+        appendLog("CoreBluetooth 已恢复当前设备会话。")
+    }
+
     func centralManager(
         _ central: CBCentralManager,
         didDiscover peripheral: CBPeripheral,
@@ -920,7 +1136,7 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
             ?? "TodooCard"
         let card = DiscoveredCard(
             id: peripheral.identifier,
-            name: name,
+            name: resolvedDeviceName(for: peripheral.identifier, fallback: name),
             rssi: RSSI.intValue,
             firmwareVersion: advertisement.firmwareVersion,
             pairingWindowOpen: advertisement.pairingWindowOpen,
@@ -938,9 +1154,17 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
             automaticSendPayload = nil
             appendLog("找到已记住的自动化设备，开始连接并发送。")
             connectAndSend(deviceID: peripheral.identifier, payload: payload)
+        } else if isFindingCurrentDevice,
+                  peripheral.identifier == currentDeviceIdentifier,
+                  let payload = pendingPayload {
+            isFindingCurrentDevice = false
+            appendLog("找到当前设备，继续连接并发送。")
+            connectAndSend(deviceID: peripheral.identifier, payload: payload)
         } else if automaticSendPayload != nil {
             statusText = "正在查找已记住的卡片…"
-        } else {
+        } else if isFindingCurrentDevice {
+            statusText = "正在查找 \(connectedDeviceName ?? "当前设备")…"
+        } else if !isConnected {
             statusText = "发现 \(devices.count) 台兼容设备"
         }
     }
@@ -950,7 +1174,10 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         reconnectAttempts = 0
         resetConnectionDiscovery()
         isConnecting = true
-        connectedDeviceName = peripheral.name ?? "TodooCard"
+        persistCurrentDevice(
+            identifier: peripheral.identifier,
+            name: resolvedDeviceName(for: peripheral.identifier, fallback: peripheral.name)
+        )
         statusText = "正在验证安全连接…"
         appendLog("已连接；先发现加密 Battery 服务。")
         peripheral.discoverServices(nil)
@@ -1090,6 +1317,7 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
         isConnecting = false
         lastGATTActivityAt = Date()
         appendLog("控制通知已订阅。")
+        rememberActiveDevice()
         startTransferIfReady()
     }
 
