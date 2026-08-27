@@ -17,7 +17,12 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
 func runChecks() throws {
     try check(CardPhysicalSize.widthMillimeters == 62, "physical card width")
     try check(CardPhysicalSize.heightMillimeters == 97.5, "physical card height")
+    try check(CardPhysicalSize.cornerRadiusMillimeters == 6.4, "physical card corner radius")
     try check(abs(CardPhysicalSize.aspectRatio - 124.0 / 195.0) < 0.000_001, "physical card aspect ratio")
+    try check(
+        abs(CardPhysicalSize.cornerRadiusToWidthRatio - 16.0 / 155.0) < 0.000_001,
+        "physical card corner radius ratio"
+    )
     try check(abs(CardDisplay.aspectRatio - 2.0 / 3.0) < 0.000_001, "display aspect ratio")
 
     let advertisement = try parseTodooAdvertisement(Data([0x53, 0x50, 0x4C, 0x03, 0x8C, 0x00, 0x13]))

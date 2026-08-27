@@ -383,6 +383,7 @@ private struct HomeHeroArtwork: View {
       let screenAspectRatio = CGFloat(CardDisplay.aspectRatio)
       let cardHeight = min(proxy.size.height * 0.86, proxy.size.width * 0.48 / cardAspectRatio)
       let cardWidth = cardHeight * cardAspectRatio
+      let cardCornerRadius = cardWidth * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
       let screenWidth = cardWidth * 0.86
       let screenHeight = screenWidth / screenAspectRatio
 
@@ -401,10 +402,10 @@ private struct HomeHeroArtwork: View {
           .offset(x: proxy.size.width * 0.38, y: proxy.size.height * 0.34)
 
         ZStack(alignment: .top) {
-          RoundedRectangle(cornerRadius: cardWidth * 0.075, style: .continuous)
+          RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
             .fill(AppTheme.deviceShell)
             .overlay {
-              RoundedRectangle(cornerRadius: cardWidth * 0.075, style: .continuous)
+              RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.72), lineWidth: 1)
             }
 
@@ -592,16 +593,17 @@ private struct PreviewCanvas: View {
       let screenAspectRatio = CGFloat(CardDisplay.aspectRatio)
       let cardHeight = min(proxy.size.height * 0.96, proxy.size.width / cardAspectRatio)
       let cardWidth = cardHeight * cardAspectRatio
+      let cardCornerRadius = cardWidth * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
       let screenWidth = cardWidth * 0.86
       let screenHeight = screenWidth / screenAspectRatio
       let screenSize = CGSize(width: screenWidth, height: screenHeight)
       let interactiveZoom = min(4, max(1, editor.zoom * Double(gesture.magnification)))
 
       ZStack(alignment: .top) {
-        RoundedRectangle(cornerRadius: cardWidth * 0.075, style: .continuous)
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
           .fill(AppTheme.deviceShell)
           .overlay {
-            RoundedRectangle(cornerRadius: cardWidth * 0.075, style: .continuous)
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
               .stroke(Color.white.opacity(0.72), lineWidth: 1)
           }
 
@@ -1364,11 +1366,13 @@ private struct DeviceRow: View {
 
 private struct MiniCardDeviceIcon: View {
   private let width: CGFloat = 39
-  private let height: CGFloat = 63
 
   var body: some View {
+    let height = width / CGFloat(CardPhysicalSize.aspectRatio)
+    let cornerRadius = width * CGFloat(CardPhysicalSize.cornerRadiusToWidthRatio)
+
     ZStack(alignment: .top) {
-      RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         .fill(AppTheme.deviceShell)
 
       ScreenArtwork()
@@ -1382,7 +1386,7 @@ private struct MiniCardDeviceIcon: View {
     }
     .frame(width: width, height: height)
     .overlay {
-      RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         .stroke(Color.white.opacity(0.7), lineWidth: 0.7)
     }
     .shadow(color: AppTheme.shadow.opacity(0.55), radius: 5, y: 3)
