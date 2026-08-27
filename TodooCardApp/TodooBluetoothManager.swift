@@ -20,7 +20,6 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     @Published private(set) var isScanning = false
     @Published private(set) var isConnected = false
     @Published private(set) var isSending = false
-    @Published private(set) var isRecoveringConnection = false
     @Published private(set) var progress = 0.0
     @Published private(set) var statusText = "未连接"
     @Published private(set) var connectedDeviceName: String?
@@ -35,11 +34,6 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         case waitingStart
         case sendingData
         case waitingFinal
-    }
-
-    private enum ControlWriteMode: Equatable {
-        case preferWithResponse
-        case withoutResponseOnly
     }
 
     private struct PendingControlWrite {
@@ -60,14 +54,13 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var pendingPayload: Data?
     private var pendingControlWrite: PendingControlWrite?
     private var phase = Phase.idle
-    private var controlWriteMode = ControlWriteMode.preferWithResponse
-    private var reconnectingForControlFallback = false
-    private var controlFallbackReconnects = 0
 
     private var batteryReadComplete = false
     private var transferCharacteristicsReady = false
     private var controlNotificationsReady = false
     private var handshakeScheduled = false
+    private var secureCacheRefreshScheduled = false
+    private var controlRetriedWithoutResponse = false
 
     private var blockPayloadSize = 0
     private var totalBlocks = 0
@@ -82,7 +75,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var scanTask: Task<Void, Never>?
     private var windowTask: Task<Void, Never>?
     private var deadlineTask: Task<Void, Never>?
-    private var reconnectTask: Task<Void, Never>?
+    private var controlFallbackTask: Task<Void, Never>?
+    private var serviceRefreshTask: Task<Void, Never>?
     private var transferID = UUID()
 
     override init() {
@@ -136,11 +130,6 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         stopDiscovery()
         pendingPayload = payload
         errorMessage = nil
-        controlWriteMode = .preferWithResponse
-        controlFallbackReconnects = 0
-        reconnectingForControlFallback = false
-        isRecoveringConnection = false
-        reconnectTask?.cancel()
 
         if peripheral.state == .connected, activePeripheral?.identifier == peripheral.identifier {
             startTransferIfReady()
@@ -167,9 +156,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     func disconnect() {
         windowTask?.cancel()
         deadlineTask?.cancel()
-        reconnectTask?.cancel()
-        reconnectingForControlFallback = false
-        isRecoveringConnection = false
+        controlFallbackTask?.cancel()
+        serviceRefreshTask?.cancel()
         if let activePeripheral {
             central.cancelPeripheralConnection(activePeripheral)
         }
@@ -186,15 +174,16 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         transferCharacteristicsReady = false
         controlNotificationsReady = false
         handshakeScheduled = false
+        secureCacheRefreshScheduled = false
+        controlRetriedWithoutResponse = false
         pendingControlWrite = nil
         batteryLevel = nil
         phase = .idle
     }
 
     private func clearConnection() {
-        reconnectTask?.cancel()
-        reconnectingForControlFallback = false
-        isRecoveringConnection = false
+        controlFallbackTask?.cancel()
+        serviceRefreshTask?.cancel()
         resetConnectionDiscovery()
         activePeripheral = nil
         isConnected = false
@@ -210,14 +199,10 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             return
         }
         guard !isSending, !handshakeScheduled else { return }
-        isRecoveringConnection = false
         handshakeScheduled = true
         statusText = "正在准备传输…"
-        let settleNanoseconds: UInt64 = controlWriteMode == .withoutResponseOnly
-            ? 1_000_000_000
-            : 400_000_000
-        let settleMilliseconds = settleNanoseconds / 1_000_000
-        appendLog("电量读取和控制通知均已就绪；等待 \(settleMilliseconds) ms 稳定通知链路。")
+        let settleNanoseconds: UInt64 = 400_000_000
+        appendLog("电量读取和控制通知均已就绪；等待 400 ms 稳定通知链路。")
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: settleNanoseconds)
             guard !Task.isCancelled, let self else { return }
@@ -269,86 +254,56 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             timeoutMessage: timeoutMessage
         )
         pendingControlWrite = pending
+        controlRetriedWithoutResponse = false
         deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
 
-        if controlWriteMode == .withoutResponseOnly {
-            appendLog("控制写入模式：重连后的 withoutResponse 兼容路径。")
-            writeControlWithoutResponse(pending, reason: nil)
-        } else if characteristic.properties.contains(.write) {
-            appendLog("控制 -> \(data.hexString) (withResponse)")
-            peripheral.writeValue(data, for: characteristic, type: .withResponse)
-            armControlWriteDeadline(pending)
-        } else {
-            writeControlWithoutResponse(pending, reason: nil)
-        }
+        let type: CBCharacteristicWriteType = characteristic.properties.contains(.write)
+            ? .withResponse
+            : .withoutResponse
+        armControlResponseDeadline(pending, initialType: type)
+        armControlFallback(pending)
+        let label = type == .withResponse ? "withResponse" : "withoutResponse"
+        appendLog("控制 -> \(data.hexString) (\(label))")
+        peripheral.writeValue(data, for: characteristic, type: type)
     }
 
-    private func armControlWriteDeadline(_ pending: PendingControlWrite) {
+    private func armControlResponseDeadline(
+        _ pending: PendingControlWrite,
+        initialType: CBCharacteristicWriteType
+    ) {
         deadlineTask?.cancel()
         deadlineTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled, let self, self.matches(pending) else { return }
-            self.recoverFromStalledControlWrite(pending)
-        }
-    }
-
-    private func recoverFromStalledControlWrite(_ pending: PendingControlWrite) {
-        guard matches(pending),
-              controlCharacteristic?.properties.contains(.writeWithoutResponse) == true,
-              controlFallbackReconnects == 0,
-              let peripheral = activePeripheral else {
-            fail("控制特征 withResponse 写入未完成，且无法切换备用连接。")
-            return
-        }
-
-        deadlineTask?.cancel()
-        windowTask?.cancel()
-        pendingControlWrite = nil
-        phase = .idle
-        isSending = false
-        handshakeScheduled = false
-        controlFallbackReconnects = 1
-        controlWriteMode = .withoutResponseOnly
-        reconnectingForControlFallback = true
-        isRecoveringConnection = true
-        statusText = "正在切换兼容连接…"
-        appendLog("withResponse 的 ATT 回调 5 秒未返回；断开以清空停滞的 ATT 队列。")
-        appendLog("将自动重连，并以单次 withoutResponse 重新开始握手。")
-        central.cancelPeripheralConnection(peripheral)
-    }
-
-    private func armControlNotificationFallback(_ pending: PendingControlWrite) {
-        deadlineTask?.cancel()
-        deadlineTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !Task.isCancelled, let self, self.matches(pending) else { return }
-            guard self.controlCharacteristic?.properties.contains(.writeWithoutResponse) == true else {
-                self.pendingControlWrite = nil
-                self.armDeadline(seconds: 5, message: pending.timeoutMessage)
+            if initialType == .withResponse,
+               !self.controlRetriedWithoutResponse,
+               let peripheral = self.activePeripheral,
+               let characteristic = self.controlCharacteristic,
+               characteristic.properties.contains(.writeWithoutResponse) {
+                self.controlRetriedWithoutResponse = true
+                self.appendLog("控制回复 5 秒未到；按原始发送器流程改用 withoutResponse。")
+                peripheral.writeValue(pending.data, for: characteristic, type: .withoutResponse)
+                self.armControlResponseDeadline(pending, initialType: .withoutResponse)
                 return
             }
-            self.writeControlWithoutResponse(
-                pending,
-                reason: "ATT 写入已确认，但 600 ms 内没有控制通知；按已验证流程备用重发"
-            )
+            self.fail(pending.timeoutMessage)
         }
     }
 
-    private func writeControlWithoutResponse(_ pending: PendingControlWrite, reason: String?) {
-        guard matches(pending), let peripheral = activePeripheral,
-              let characteristic = controlCharacteristic,
-              characteristic.properties.contains(.writeWithoutResponse) else {
-            fail("控制特征不支持备用写入。")
-            return
+    private func armControlFallback(_ pending: PendingControlWrite) {
+        controlFallbackTask?.cancel()
+        guard controlCharacteristic?.properties.contains(.writeWithoutResponse) == true else { return }
+        controlFallbackTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled, let self, self.matches(pending),
+                  !self.controlRetriedWithoutResponse,
+                  let peripheral = self.activePeripheral,
+                  let characteristic = self.controlCharacteristic else { return }
+            self.controlRetriedWithoutResponse = true
+            self.appendLog("控制通知 600 ms 未到；按原始发送器流程以 withoutResponse 重发。")
+            peripheral.writeValue(pending.data, for: characteristic, type: .withoutResponse)
         }
-        if let reason { appendLog(reason) }
-        appendLog("控制 -> \(pending.data.hexString) (withoutResponse)")
-        peripheral.writeValue(pending.data, for: characteristic, type: .withoutResponse)
-        pendingControlWrite = nil
-        let timeoutMessage = controlWriteMode == .withoutResponseOnly
-            ? "\(pending.timeoutMessage) 已在干净重连后使用单次 withoutResponse 写入。"
-            : pending.timeoutMessage
-        armDeadline(seconds: 5, message: timeoutMessage)
     }
 
     private func matches(_ pending: PendingControlWrite) -> Bool {
@@ -359,7 +314,9 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     private func finishControlExchange() {
         deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
         pendingControlWrite = nil
+        controlRetriedWithoutResponse = false
     }
 
     private func handleControl(_ data: Data) {
@@ -576,6 +533,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         guard isSending else { return }
         windowTask?.cancel()
         deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
         pendingControlWrite = nil
         phase = .idle
         isSending = false
@@ -588,10 +546,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private func fail(_ message: String) {
         windowTask?.cancel()
         deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
+        serviceRefreshTask?.cancel()
         pendingControlWrite = nil
         phase = .idle
         isSending = false
-        isRecoveringConnection = false
         handshakeScheduled = false
         statusText = "操作失败"
         errorMessage = message
@@ -656,64 +615,25 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        if reconnectingForControlFallback {
-            reconnectTask?.cancel()
-            reconnectingForControlFallback = false
-            appendLog("兼容连接已建立；重新发现加密服务与通知特征。")
-        }
         isConnected = true
         connectedDeviceName = peripheral.name ?? "TodooCard"
         statusText = "正在验证安全连接…"
-        appendLog("已连接；发现 Battery、FEF0/FDF0 服务。")
-        let serviceUUIDs = [CBUUID(string: TodooBluetoothConstants.batteryService)]
-            + TodooBluetoothConstants.transferProfiles.map { CBUUID(string: $0.service) }
-        peripheral.discoverServices(serviceUUIDs)
+        appendLog("已连接；先发现加密 Battery 服务。")
+        peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        reconnectTask?.cancel()
-        reconnectingForControlFallback = false
         clearConnection()
         fail("连接失败：\(error?.localizedDescription ?? "未知错误")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral.identifier == activePeripheral?.identifier else { return }
-        if reconnectingForControlFallback {
-            resetConnectionDiscovery()
-            isConnected = false
-            isSending = false
-            statusText = "正在重新连接 TodooCard…"
-            appendLog("旧连接已断开；等待 350 ms 后建立干净连接。")
-            reconnectTask?.cancel()
-            reconnectTask = Task { [weak self, weak peripheral] in
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                guard !Task.isCancelled, let self, let peripheral,
-                      self.reconnectingForControlFallback,
-                      self.activePeripheral?.identifier == peripheral.identifier else { return }
-                self.appendLog("兼容重连 -> \(peripheral.identifier.uuidString)")
-                peripheral.delegate = self
-                self.central.connect(peripheral, options: nil)
-                self.armCompatibilityReconnectDeadline(peripheralID: peripheral.identifier)
-            }
-            return
-        }
         let wasSending = isSending
         clearConnection()
         statusText = "连接已断开"
         appendLog("设备已断开：\(error?.localizedDescription ?? "正常断开")")
         if wasSending { errorMessage = "传输过程中蓝牙连接断开。" }
-    }
-
-    private func armCompatibilityReconnectDeadline(peripheralID: UUID) {
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 12_000_000_000)
-            guard !Task.isCancelled, let self, self.reconnectingForControlFallback,
-                  self.activePeripheral?.identifier == peripheralID else { return }
-            self.reconnectingForControlFallback = false
-            self.fail("兼容模式重新连接设备超时。")
-        }
     }
 }
 
@@ -722,10 +642,22 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
         if let error { fail("发现服务失败：\(error.localizedDescription)"); return }
         guard let services = peripheral.services else { fail("设备没有返回 GATT 服务。"); return }
         appendLog("GATT 服务：\(services.map { $0.uuid.uuidString }.joined(separator: ", "))。")
-        guard let battery = services.first(where: { $0.uuid == CBUUID(string: TodooBluetoothConstants.batteryService) }) else {
-            fail("未发现加密 Battery 服务，无法验证系统绑定。")
+
+        if !batteryReadComplete {
+            guard let battery = services.first(where: {
+                $0.uuid == CBUUID(string: TodooBluetoothConstants.batteryService)
+            }) else {
+                fail("未发现加密 Battery 服务，无法验证系统绑定。")
+                return
+            }
+            appendLog("第一阶段仅验证加密 Battery；暂不缓存传输特征。")
+            peripheral.discoverCharacteristics(
+                [CBUUID(string: TodooBluetoothConstants.batteryLevel)],
+                for: battery
+            )
             return
         }
+
         guard let profile = TodooBluetoothConstants.transferProfiles.first(where: { profile in
             services.contains { $0.uuid == CBUUID(string: profile.service) }
         }), let transfer = services.first(where: { $0.uuid == CBUUID(string: profile.service) }) else {
@@ -733,8 +665,7 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
             return
         }
         selectedProfile = profile
-        appendLog("采用 \(profile.label) 传输配置。")
-        peripheral.discoverCharacteristics([CBUUID(string: TodooBluetoothConstants.batteryLevel)], for: battery)
+        appendLog("安全缓存刷新完成；采用 \(profile.label) 传输配置。")
         peripheral.discoverCharacteristics(
             [CBUUID(string: profile.control), CBUUID(string: profile.data)],
             for: transfer
@@ -802,7 +733,25 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
             batteryLevel = Int(value)
             batteryReadComplete = true
             appendLog("安全连接验证成功，电量 \(value)% 。")
-            startTransferIfReady()
+            guard !secureCacheRefreshScheduled else { return }
+            secureCacheRefreshScheduled = true
+            selectedProfile = nil
+            controlCharacteristic = nil
+            dataCharacteristic = nil
+            transferCharacteristicsReady = false
+            controlNotificationsReady = false
+            statusText = "正在刷新安全服务…"
+            appendLog("等待 1800 ms，让 Service Changed 与加密 GATT 缓存刷新。")
+            serviceRefreshTask?.cancel()
+            serviceRefreshTask = Task { [weak self, weak peripheral] in
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard !Task.isCancelled, let self, let peripheral,
+                      self.activePeripheral?.identifier == peripheral.identifier,
+                      peripheral.state == .connected else { return }
+                self.secureCacheRefreshScheduled = false
+                self.appendLog("安全缓存等待完成；重新发现全部服务与传输特征。")
+                peripheral.discoverServices(nil)
+            }
             return
         }
         guard characteristic.uuid == controlCharacteristic?.uuid else { return }
@@ -812,24 +761,10 @@ extension TodooBluetoothManager: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard characteristic.uuid == controlCharacteristic?.uuid,
-              let pending = pendingControlWrite,
-              matches(pending) else { return }
-        deadlineTask?.cancel()
-
         if let error {
-            guard characteristic.properties.contains(.writeWithoutResponse) else {
-                fail("控制特征写入失败：\(error.localizedDescription)")
-                return
-            }
-            writeControlWithoutResponse(
-                pending,
-                reason: "withResponse 写入失败（\(error.localizedDescription)）；改用备用写入"
-            )
+            fail("写入 \(characteristic.uuid.uuidString) 失败：\(error.localizedDescription)")
             return
         }
-
         appendLog("控制 ATT 写入已确认。")
-        armControlNotificationFallback(pending)
     }
 }

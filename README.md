@@ -15,10 +15,10 @@ TodooCard/T3 的原生 iOS 图片发送器。图片的解码、裁切、旋转�
 - 按 `0x5053` 厂商标识与 `0x134C` 屏幕类型过滤设备；
 - 读取加密 Battery Level 验证系统绑定，并支持 `FEF0/FEF1/FEF2` 与
   `FDF0/FDF1/FDF2` 两组 GATT 服务；
-- 控制命令优先采用可确认的 `withResponse` 写入，并从 CoreBluetooth 的 ATT 完成回调
-  开始计算设备通知等待时间；仅在设备未通知或明确拒绝时走 `withoutResponse` 备用路径；
-- 如果 iOS 的 ATT 写入回调本身停滞，App 会自动断开以清空队列，再建立干净连接，等待
-  通知链路稳定后用单次 `withoutResponse` 重新握手；
+- 严格遵循原始 TodooCard skill 的安全 GATT 顺序：先单独读取加密 Battery Level，等待
+  1.8 秒完成 Service Changed / 缓存刷新，再重新发现 FEF1/FEF2；
+- 控制命令优先采用 `withResponse`，设备通知 600 ms 未到时按原始发送器流程用
+  `withoutResponse` 备用重发；
 - 5 块发送窗口、4 ms 块间隔、60 ms 窗口间隔、32 块最大未确认量；
 - 累计 ACK、检查点超时有限重传，以及最终 `05 08` 刷新确认；
 - 应用内诊断日志、电量、Payload 字节数和 SHA-256。
