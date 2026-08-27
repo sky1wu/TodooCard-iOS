@@ -26,6 +26,8 @@
 	<string>用于连接 TodooCard 并发送在本机处理好的图片。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选择要显示在 TodooCard 上的图片。</string>
+	<key>TodooAppGroupIdentifier</key>
+	<string>$(TODOO_APP_GROUP_IDENTIFIER)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

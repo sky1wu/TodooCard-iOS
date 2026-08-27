@@ -39,7 +39,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     var rememberedAutomationDeviceName: String? {
         guard let identifier = preferredDeviceIdentifier else { return nil }
         return deviceAlias(for: identifier)
-            ?? UserDefaults.standard.string(forKey: Self.preferredDeviceNameKey)
+            ?? Self.preferences.string(forKey: Self.preferredDeviceNameKey)
             ?? "TodooCard"
     }
 
@@ -115,33 +115,62 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private static let deviceAliasesKey = "TodooCard.deviceAliases"
     private static let centralRestoreIdentifier = "com.todoocard.sender.central"
     private static var automaticTransferOwner: ObjectIdentifier?
+    private static let fallbackAppGroupIdentifier = "group.com.todoocard.sender"
+    private static let appGroupIdentifier: String = {
+        guard let configured = Bundle.main.object(
+            forInfoDictionaryKey: "TodooAppGroupIdentifier"
+        ) as? String, !configured.isEmpty, !configured.contains("$(") else {
+            return fallbackAppGroupIdentifier
+        }
+        return configured
+    }()
+    private static let preferences = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
+    private static let isAppExtension = Bundle.main.bundleURL.pathExtension == "appex"
+    private static let sharedPreferenceKeys = [
+        preferredDeviceIdentifierKey,
+        preferredDeviceNameKey,
+        currentDeviceIdentifierKey,
+        currentDeviceNameKey,
+        deviceAliasesKey,
+    ]
 
     private var preferredDeviceIdentifier: UUID? {
-        guard let value = UserDefaults.standard.string(forKey: Self.preferredDeviceIdentifierKey)
+        guard let value = Self.preferences.string(forKey: Self.preferredDeviceIdentifierKey)
         else { return nil }
         return UUID(uuidString: value)
     }
 
     private var persistedCurrentDeviceIdentifier: UUID? {
-        guard let value = UserDefaults.standard.string(forKey: Self.currentDeviceIdentifierKey)
+        guard let value = Self.preferences.string(forKey: Self.currentDeviceIdentifierKey)
         else { return nil }
         return UUID(uuidString: value)
     }
 
     override init() {
         super.init()
+        Self.migrateLegacyPreferencesIfNeeded()
         if let identifier = persistedCurrentDeviceIdentifier {
             shouldMaintainConnection = true
             connectedDeviceName = resolvedDeviceName(
                 for: identifier,
-                fallback: UserDefaults.standard.string(forKey: Self.currentDeviceNameKey)
+                fallback: Self.preferences.string(forKey: Self.currentDeviceNameKey)
             )
         }
         central = CBCentralManager(
             delegate: self,
             queue: .main,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: Self.centralRestoreIdentifier]
+            options: Self.isAppExtension
+                ? nil
+                : [CBCentralManagerOptionRestoreIdentifierKey: Self.centralRestoreIdentifier]
         )
+    }
+
+    private static func migrateLegacyPreferencesIfNeeded() {
+        guard !isAppExtension else { return }
+        for key in sharedPreferenceKeys where preferences.object(forKey: key) == nil {
+            guard let legacyValue = UserDefaults.standard.object(forKey: key) else { continue }
+            preferences.set(legacyValue, forKey: key)
+        }
     }
 
     func beginDiscovery() {
@@ -158,7 +187,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             return
         }
         guard !isBusy else {
-            errorMessage = "TodooCard 正在执行另一项操作，请稍后重新运行快捷指令。"
+            errorMessage = "TodooCard 正在执行另一项操作，请稍后重新发送。"
             return
         }
         if isConnected {
@@ -178,7 +207,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             resumeAutomaticSend()
         case .unknown, .resetting:
             statusText = "正在等待蓝牙就绪…"
-            appendLog("快捷指令图片已就绪；等待 CoreBluetooth 初始化。")
+            appendLog("自动发送图片已就绪；等待 CoreBluetooth 初始化。")
         case .poweredOff:
             fail("请先在系统设置中打开蓝牙。")
         case .unauthorized:
@@ -846,15 +875,15 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private func rememberActiveDevice() {
         guard let peripheral = activePeripheral else { return }
         let changed = preferredDeviceIdentifier != peripheral.identifier
-        UserDefaults.standard.set(
+        Self.preferences.set(
             peripheral.identifier.uuidString,
             forKey: Self.preferredDeviceIdentifierKey
         )
-        UserDefaults.standard.set(
+        Self.preferences.set(
             connectedDeviceName ?? peripheral.name ?? "TodooCard",
             forKey: Self.preferredDeviceNameKey
         )
-        if changed { appendLog("已将当前设备设为后续发送与快捷指令的默认设备。") }
+        if changed { appendLog("已将当前设备设为后续分享与自动化发送的默认设备。") }
     }
 
     func renameCurrentDevice(to name: String) {
@@ -864,10 +893,10 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
         var aliases = deviceAliases
         aliases[identifier.uuidString] = normalizedName
-        UserDefaults.standard.set(aliases, forKey: Self.deviceAliasesKey)
-        UserDefaults.standard.set(normalizedName, forKey: Self.currentDeviceNameKey)
+        Self.preferences.set(aliases, forKey: Self.deviceAliasesKey)
+        Self.preferences.set(normalizedName, forKey: Self.currentDeviceNameKey)
         if preferredDeviceIdentifier == identifier {
-            UserDefaults.standard.set(normalizedName, forKey: Self.preferredDeviceNameKey)
+            Self.preferences.set(normalizedName, forKey: Self.preferredDeviceNameKey)
         }
         connectedDeviceName = normalizedName
         if let index = devices.firstIndex(where: { $0.id == identifier }) {
@@ -888,7 +917,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     }
 
     private var deviceAliases: [String: String] {
-        UserDefaults.standard.dictionary(forKey: Self.deviceAliasesKey) as? [String: String] ?? [:]
+        Self.preferences.dictionary(forKey: Self.deviceAliasesKey) as? [String: String] ?? [:]
     }
 
     private func deviceAlias(for identifier: UUID) -> String? {
@@ -900,17 +929,17 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     }
 
     private func persistCurrentDevice(identifier: UUID, name: String) {
-        UserDefaults.standard.set(
+        Self.preferences.set(
             identifier.uuidString,
             forKey: Self.currentDeviceIdentifierKey
         )
-        UserDefaults.standard.set(name, forKey: Self.currentDeviceNameKey)
+        Self.preferences.set(name, forKey: Self.currentDeviceNameKey)
         connectedDeviceName = name
     }
 
     private func clearPersistedCurrentDevice() {
-        UserDefaults.standard.removeObject(forKey: Self.currentDeviceIdentifierKey)
-        UserDefaults.standard.removeObject(forKey: Self.currentDeviceNameKey)
+        Self.preferences.removeObject(forKey: Self.currentDeviceIdentifierKey)
+        Self.preferences.removeObject(forKey: Self.currentDeviceNameKey)
         connectedDeviceName = nil
     }
 
@@ -1114,7 +1143,7 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         isConnecting = true
         connectedDeviceName = resolvedDeviceName(
             for: identifier,
-            fallback: UserDefaults.standard.string(forKey: Self.currentDeviceNameKey) ?? peripheral.name
+            fallback: Self.preferences.string(forKey: Self.currentDeviceNameKey) ?? peripheral.name
         )
         statusText = "正在恢复与 \(connectedDeviceName ?? "TodooCard") 的连接…"
         appendLog("CoreBluetooth 已恢复当前设备会话。")

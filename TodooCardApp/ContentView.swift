@@ -1112,7 +1112,7 @@ private struct DiagnosticsView: View {
           LabeledContent("连接", value: connectionDescription)
           LabeledContent("电量", value: bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
           LabeledContent(
-            "快捷指令设备",
+            "自动发送设备",
             value: bluetooth.rememberedAutomationDeviceName ?? "未设置（先手动发送一次）"
           )
           LabeledContent("厂商 / 屏幕", value: "0x5053 / 0x134C")

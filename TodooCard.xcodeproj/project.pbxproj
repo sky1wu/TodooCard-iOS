@@ -20,7 +20,42 @@
 		A0000000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* Assets.xcassets */; };
 		A0000000000000000000000C /* Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000E /* Shortcuts.swift */; };
 		A0000000000000000000000D /* BingDailyWallpaper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000F /* BingDailyWallpaper.swift */; };
+		A0000000000000000000000E /* AutomaticImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AutomaticImageProcessor.swift */; };
+		A10000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* ShareViewController.swift */; };
+		A10000000000000000000002 /* AutomaticImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AutomaticImageProcessor.swift */; };
+		A10000000000000000000003 /* ImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* ImageProcessor.swift */; };
+		A10000000000000000000004 /* TodooBluetoothManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* TodooBluetoothManager.swift */; };
+		A10000000000000000000005 /* CardConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* CardConstants.swift */; };
+		A10000000000000000000006 /* CoverLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000007 /* CoverLayout.swift */; };
+		A10000000000000000000007 /* Dithering.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* Dithering.swift */; };
+		A10000000000000000000008 /* PayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* PayloadBuilder.swift */; };
+		A10000000000000000000009 /* TransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* TransferProtocol.swift */; };
+		A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* TodooCardShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		K10000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E10000000000000000000001;
+			remoteInfo = TodooCardShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D10000000000000000000004 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		B00000000000000000000001 /* TodooCardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodooCardApp.swift; sourceTree = "<group>"; };
@@ -38,10 +73,23 @@
 		B0000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0000000000000000000000E /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
 		B0000000000000000000000F /* BingDailyWallpaper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BingDailyWallpaper.swift; sourceTree = "<group>"; };
+		B00000000000000000000010 /* AutomaticImageProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticImageProcessor.swift; sourceTree = "<group>"; };
+		B00000000000000000000011 /* TodooCard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCard.entitlements; sourceTree = "<group>"; };
+		B10000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		B10000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000000000000000000003 /* TodooCardShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCardShareExtension.entitlements; sourceTree = "<group>"; };
+		B10000000000000000000004 /* TodooCardShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TodooCardShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D00000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -56,6 +104,7 @@
 			children = (
 				C00000000000000000000002 /* TodooCardApp */,
 				C00000000000000000000003 /* TodooCore */,
+				C10000000000000000000001 /* TodooCardShareExtension */,
 				C00000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -68,10 +117,12 @@
 				B00000000000000000000003 /* EditorModel.swift */,
 				B00000000000000000000004 /* ImageProcessor.swift */,
 				B00000000000000000000005 /* TodooBluetoothManager.swift */,
+				B00000000000000000000010 /* AutomaticImageProcessor.swift */,
 				B0000000000000000000000E /* Shortcuts.swift */,
 				B0000000000000000000000F /* BingDailyWallpaper.swift */,
 				B0000000000000000000000D /* Assets.xcassets */,
 				B0000000000000000000000B /* Info.plist */,
+				B00000000000000000000011 /* TodooCard.entitlements */,
 			);
 			path = TodooCardApp;
 			sourceTree = "<group>";
@@ -92,8 +143,19 @@
 			isa = PBXGroup;
 			children = (
 				B0000000000000000000000C /* TodooCard.app */,
+				B10000000000000000000004 /* TodooCardShareExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000001 /* TodooCardShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000001 /* ShareViewController.swift */,
+				B10000000000000000000002 /* Info.plist */,
+				B10000000000000000000003 /* TodooCardShareExtension.entitlements */,
+			);
+			path = TodooCardShareExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -106,15 +168,34 @@
 				D00000000000000000000001 /* Sources */,
 				D00000000000000000000002 /* Frameworks */,
 				D00000000000000000000003 /* Resources */,
+				D10000000000000000000004 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				K10000000000000000000002 /* PBXTargetDependency */,
 			);
 			name = TodooCard;
 			productName = TodooCard;
 			productReference = B0000000000000000000000C /* TodooCard.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E10000000000000000000001 /* TodooCardShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = J10000000000000000000001 /* Build configuration list for PBXNativeTarget "TodooCardShareExtension" */;
+			buildPhases = (
+				D10000000000000000000001 /* Sources */,
+				D10000000000000000000002 /* Frameworks */,
+				D10000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TodooCardShareExtension;
+			productName = TodooCardShareExtension;
+			productReference = B10000000000000000000004 /* TodooCardShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -128,6 +209,19 @@
 				TargetAttributes = {
 					E00000000000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
+					};
+					E10000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -146,6 +240,7 @@
 			projectRoot = "";
 			targets = (
 				E00000000000000000000001 /* TodooCard */,
+				E10000000000000000000001 /* TodooCardShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -156,6 +251,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0000000000000000000000B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,6 +273,7 @@
 				A00000000000000000000003 /* EditorModel.swift in Sources */,
 				A00000000000000000000004 /* ImageProcessor.swift in Sources */,
 				A00000000000000000000005 /* TodooBluetoothManager.swift in Sources */,
+				A0000000000000000000000E /* AutomaticImageProcessor.swift in Sources */,
 				A00000000000000000000006 /* CardConstants.swift in Sources */,
 				A00000000000000000000007 /* CoverLayout.swift in Sources */,
 				A00000000000000000000008 /* Dithering.swift in Sources */,
@@ -181,7 +284,31 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D10000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* ShareViewController.swift in Sources */,
+				A10000000000000000000002 /* AutomaticImageProcessor.swift in Sources */,
+				A10000000000000000000003 /* ImageProcessor.swift in Sources */,
+				A10000000000000000000004 /* TodooBluetoothManager.swift in Sources */,
+				A10000000000000000000005 /* CardConstants.swift in Sources */,
+				A10000000000000000000006 /* CoverLayout.swift in Sources */,
+				A10000000000000000000007 /* Dithering.swift in Sources */,
+				A10000000000000000000008 /* PayloadBuilder.swift in Sources */,
+				A10000000000000000000009 /* TransferProtocol.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		K10000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E10000000000000000000001 /* TodooCardShareExtension */;
+			targetProxy = K10000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		G00000000000000000000001 /* Debug */ = {
@@ -228,6 +355,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TodooCardApp/TodooCard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
@@ -243,6 +371,7 @@
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				TODOO_APP_GROUP_IDENTIFIER = group.com.todoocard.sender;
 			};
 			name = Debug;
 		};
@@ -250,6 +379,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TodooCardApp/TodooCard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
@@ -264,6 +394,65 @@
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				TODOO_APP_GROUP_IDENTIFIER = group.com.todoocard.sender;
+			};
+			name = Release;
+		};
+		H10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TodooCardShareExtension/TodooCardShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TodooCardShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.todoocard.sender.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TODOO_APP_GROUP_IDENTIFIER = group.com.todoocard.sender;
+			};
+			name = Debug;
+		};
+		H10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TodooCardShareExtension/TodooCardShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TodooCardShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.todoocard.sender.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TODOO_APP_GROUP_IDENTIFIER = group.com.todoocard.sender;
 			};
 			name = Release;
 		};
@@ -284,6 +473,15 @@
 			buildConfigurations = (
 				H00000000000000000000001 /* Debug */,
 				H00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		J10000000000000000000001 /* Build configuration list for PBXNativeTarget "TodooCardShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				H10000000000000000000001 /* Debug */,
+				H10000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
