@@ -1,12 +1,13 @@
 import AppIntents
 import Foundation
+import UIKit
 
 struct UpdateTodooCardIntent: AppIntent {
   static let title: LocalizedStringResource = "自动更新 TodooCard"
   static let description = IntentDescription(
-    "导入一张图片，使用默认显示效果生成卡片内容，并自动发送到上次成功使用的 TodooCard。"
+    "在后台导入一张图片，使用默认显示效果生成卡片内容，并自动发送到上次成功使用的 TodooCard。"
   )
-  static let openAppWhenRun = true
+  static let openAppWhenRun = false
 
   @Parameter(
     title: "图片",
@@ -19,12 +20,15 @@ struct UpdateTodooCardIntent: AppIntent {
     Summary("用 TodooCard 自动发送 \(\.$image)")
   }
 
-  func perform() async throws -> some IntentResult & ProvidesDialog {
-    try ShortcutInbox.enqueue(imageData: image.data)
-    await MainActor.run {
-      NotificationCenter.default.post(name: ShortcutInbox.didReceiveRequest, object: nil)
-    }
-    return .result(dialog: "图片已交给 TodooCard，将自动处理并发送。")
+  func perform() async throws -> some IntentResult {
+    let imageData = image.data
+    let payload = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.makePayload(from: imageData)
+    }.value
+
+    let bluetooth = await TodooBluetoothManager.shared
+    try await bluetooth.sendAutomaticallyAndWait(payload)
+    return .result()
   }
 }
 
@@ -44,96 +48,43 @@ struct TodooCardShortcuts: AppShortcutsProvider {
   static var shortcutTileColor: ShortcutTileColor { .blue }
 }
 
-struct PendingShortcutRequest: Codable, Sendable {
-  let stagedImageFileName: String
-}
-
-enum ShortcutInbox {
-  static let didReceiveRequest = Notification.Name("TodooCardShortcutInboxDidReceiveRequest")
+private enum AutomaticImageProcessor {
   static let maximumImageBytes = 100_000_000
+  static let maximumImagePixels = 50_000_000
 
-  private static let requestFileName = "pending-request.json"
+  static func makePayload(from data: Data) throws -> Data {
+    guard !data.isEmpty else { throw AutomaticUpdateError.emptyImage }
+    guard data.count <= maximumImageBytes else { throw AutomaticUpdateError.imageTooLarge }
+    guard let decoded = UIImage(data: data) else { throw AutomaticUpdateError.invalidImage }
 
-  static func enqueue(imageData: Data) throws {
-    guard !imageData.isEmpty else { throw ShortcutInboxError.emptyImage }
-    guard imageData.count <= maximumImageBytes else { throw ShortcutInboxError.imageTooLarge }
-
-    let manager = FileManager.default
-    let directory = try inboxDirectory(using: manager)
-    try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-    removePreviouslyStagedImage(in: directory, using: manager)
-
-    let stagedFileName = UUID().uuidString
-    let stagedURL = directory.appendingPathComponent(stagedFileName, isDirectory: false)
-    do {
-      try imageData.write(to: stagedURL, options: [.atomic, .completeFileProtection])
-      let request = PendingShortcutRequest(stagedImageFileName: stagedFileName)
-      let encoded = try JSONEncoder().encode(request)
-      try encoded.write(
-        to: directory.appendingPathComponent(requestFileName, isDirectory: false),
-        options: [.atomic, .completeFileProtection]
-      )
-    } catch {
-      try? manager.removeItem(at: stagedURL)
-      throw error
+    let pixelWidth = decoded.cgImage?.width ?? Int(decoded.size.width * decoded.scale)
+    let pixelHeight = decoded.cgImage?.height ?? Int(decoded.size.height * decoded.scale)
+    let (pixelCount, overflow) = pixelWidth.multipliedReportingOverflow(by: pixelHeight)
+    guard !overflow, pixelCount <= maximumImagePixels else {
+      throw AutomaticUpdateError.tooManyPixels
     }
-  }
 
-  static func takeRequest() throws -> PendingShortcutRequest? {
-    let manager = FileManager.default
-    let directory = try inboxDirectory(using: manager)
-    let requestURL = directory.appendingPathComponent(requestFileName, isDirectory: false)
-    guard manager.fileExists(atPath: requestURL.path) else { return nil }
-
-    let data = try Data(contentsOf: requestURL)
-    try manager.removeItem(at: requestURL)
-    do {
-      return try JSONDecoder().decode(PendingShortcutRequest.self, from: data)
-    } catch {
-      throw ShortcutInboxError.invalidRequest
-    }
-  }
-
-  static func loadAndRemoveImage(for request: PendingShortcutRequest) throws -> Data {
-    guard UUID(uuidString: request.stagedImageFileName) != nil else {
-      throw ShortcutInboxError.invalidRequest
-    }
-    let manager = FileManager.default
-    let directory = try inboxDirectory(using: manager)
-    let imageURL = directory.appendingPathComponent(request.stagedImageFileName, isDirectory: false)
-    defer { try? manager.removeItem(at: imageURL) }
-    return try Data(contentsOf: imageURL)
-  }
-
-  private static func inboxDirectory(using manager: FileManager) throws -> URL {
-    guard let applicationSupport = manager.urls(
-      for: .applicationSupportDirectory,
-      in: .userDomainMask
-    ).first else {
-      throw ShortcutInboxError.storageUnavailable
-    }
-    return applicationSupport
-      .appendingPathComponent("TodooCard", isDirectory: true)
-      .appendingPathComponent("ShortcutInbox", isDirectory: true)
-  }
-
-  private static func removePreviouslyStagedImage(in directory: URL, using manager: FileManager) {
-    let requestURL = directory.appendingPathComponent(requestFileName, isDirectory: false)
-    defer { try? manager.removeItem(at: requestURL) }
-    guard let data = try? Data(contentsOf: requestURL),
-          let request = try? JSONDecoder().decode(PendingShortcutRequest.self, from: data),
-          UUID(uuidString: request.stagedImageFileName) != nil else { return }
-    try? manager.removeItem(
-      at: directory.appendingPathComponent(request.stagedImageFileName, isDirectory: false)
+    let request = ImageProcessingRequest(
+      image: ImageProcessor.normalized(decoded),
+      rotation: 0,
+      focusX: 50,
+      focusY: 50,
+      zoom: 1,
+      algorithm: .floydSteinberg,
+      strength: 1,
+      brightnessCompensation: 0
     )
+    return try ImageProcessor.process(request).payload
   }
 }
 
-enum ShortcutInboxError: LocalizedError {
+enum AutomaticUpdateError: LocalizedError {
   case emptyImage
   case imageTooLarge
-  case invalidRequest
-  case storageUnavailable
+  case invalidImage
+  case tooManyPixels
+  case transferInProgress
+  case transferFailed(String)
 
   var errorDescription: String? {
     switch self {
@@ -141,10 +92,14 @@ enum ShortcutInboxError: LocalizedError {
       return "快捷指令没有提供图片内容。"
     case .imageTooLarge:
       return "图片超过 100 MB 安全限制。"
-    case .invalidRequest:
-      return "快捷指令传入的图片请求已损坏，请重新运行。"
-    case .storageUnavailable:
-      return "无法访问 TodooCard 的快捷指令暂存目录。"
+    case .invalidImage:
+      return "无法解码图片，请改用 PNG、JPEG、HEIF 或 WebP。"
+    case .tooManyPixels:
+      return "图片超过 5000 万像素安全限制。"
+    case .transferInProgress:
+      return "TodooCard 正在执行另一项发送。"
+    case .transferFailed(let message):
+      return message
     }
   }
 }

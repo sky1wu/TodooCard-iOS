@@ -16,6 +16,8 @@ struct DiscoveredCard: Identifiable, Equatable {
 
 @MainActor
 final class TodooBluetoothManager: NSObject, ObservableObject {
+    static let shared = TodooBluetoothManager()
+
     @Published private(set) var devices: [DiscoveredCard] = []
     @Published private(set) var isScanning = false
     @Published private(set) var isConnected = false
@@ -95,10 +97,13 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var serviceRefreshTask: Task<Void, Never>?
     private var handshakeTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var automaticTransferTimeoutTask: Task<Void, Never>?
+    private var automaticTransferContinuation: CheckedContinuation<Void, Error>?
     private var transferID = UUID()
 
     private static let preferredDeviceIdentifierKey = "TodooCard.preferredDeviceIdentifier"
     private static let preferredDeviceNameKey = "TodooCard.preferredDeviceName"
+    private static var automaticTransferOwner: ObjectIdentifier?
 
     private var preferredDeviceIdentifier: UUID? {
         guard let value = UserDefaults.standard.string(forKey: Self.preferredDeviceIdentifierKey)
@@ -117,7 +122,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         startDiscovery()
     }
 
-    func sendAutomatically(_ payload: Data) {
+    private func sendAutomatically(_ payload: Data) {
         errorMessage = nil
         guard !payload.isEmpty else {
             fail("不能发送空 Payload。")
@@ -141,7 +146,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isPreparingTransfer = true
         switch central.state {
         case .poweredOn:
-            startDiscovery()
+            resumeAutomaticSend()
         case .unknown, .resetting:
             statusText = "正在等待蓝牙就绪…"
             appendLog("快捷指令图片已就绪；等待 CoreBluetooth 初始化。")
@@ -153,6 +158,44 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             fail("此设备不支持蓝牙。")
         @unknown default:
             fail("无法初始化蓝牙。")
+        }
+    }
+
+    func sendAutomaticallyAndWait(_ payload: Data) async throws {
+        guard automaticTransferContinuation == nil, !isBusy,
+              Self.automaticTransferOwner == nil else {
+            throw AutomaticUpdateError.transferInProgress
+        }
+        Self.automaticTransferOwner = ObjectIdentifier(self)
+        defer {
+            if Self.automaticTransferOwner == ObjectIdentifier(self) {
+                Self.automaticTransferOwner = nil
+            }
+        }
+        try await withCheckedThrowingContinuation { continuation in
+            automaticTransferContinuation = continuation
+            automaticTransferTimeoutTask?.cancel()
+            automaticTransferTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 180_000_000_000)
+                guard !Task.isCancelled, let self,
+                      self.automaticTransferContinuation != nil else { return }
+                self.fail("后台自动发送超过 3 分钟，已停止等待。")
+            }
+            sendAutomatically(payload)
+        }
+    }
+
+    private func resumeAutomaticSend() {
+        guard central.state == .poweredOn,
+              let payload = automaticSendPayload,
+              let identifier = preferredDeviceIdentifier else { return }
+        if let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first {
+            automaticSendPayload = nil
+            appendLog("从系统缓存恢复已记住的自动化设备，直接连接。")
+            connectAndSend(peripheral: peripheral, payload: payload)
+        } else {
+            appendLog("系统缓存中没有已记住的设备，回退到蓝牙扫描。")
+            startDiscovery()
         }
     }
 
@@ -204,6 +247,10 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             fail("设备广播显示 pairing=open。请先在系统蓝牙设置中完成绑定，等待配对窗口关闭后再试。")
             return
         }
+        connectAndSend(peripheral: peripheral, payload: payload)
+    }
+
+    private func connectAndSend(peripheral: CBPeripheral, payload: Data) {
         stopDiscovery()
         pendingPayload = payload
         progress = 0
@@ -269,6 +316,9 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         }
         clearConnection()
         statusText = "已断开连接"
+        finishAutomaticTransfer(
+            .failure(AutomaticUpdateError.transferFailed("后台自动发送已取消。"))
+        )
     }
 
     private func resetConnectionDiscovery() {
@@ -678,6 +728,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         statusText = "发送成功，连接已保持"
         rememberActiveDevice()
         appendLog("收到最终 ACK \(finalAck)；写入 \(dataWrites) 块，重传 \(retransmittedBlocks) 块。")
+        finishAutomaticTransfer(.success(()))
     }
 
     private func rememberActiveDevice() {
@@ -718,6 +769,23 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         statusText = "操作失败"
         errorMessage = message
         appendLog("错误：\(message)")
+        finishAutomaticTransfer(.failure(AutomaticUpdateError.transferFailed(message)))
+    }
+
+    private func finishAutomaticTransfer(_ result: Result<Void, Error>) {
+        automaticTransferTimeoutTask?.cancel()
+        automaticTransferTimeoutTask = nil
+        if Self.automaticTransferOwner == ObjectIdentifier(self) {
+            Self.automaticTransferOwner = nil
+        }
+        guard let continuation = automaticTransferContinuation else { return }
+        automaticTransferContinuation = nil
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
     }
 
     private func appendLog(_ message: String) {
@@ -769,10 +837,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         guard shouldMaintainConnection, central.state == .poweredOn else { return }
         guard reconnectAttempts < 4 else {
             shouldMaintainConnection = false
-            clearConnection()
-            statusText = "连接已断开"
-            errorMessage = "无法恢复与 TodooCard 的连接，请确认卡片已开机后重试。"
-            appendLog("连续 4 次恢复连接失败，停止自动重连。")
+            fail("无法恢复与 TodooCard 的连接，请确认卡片已开机后重试。")
             return
         }
 
@@ -795,13 +860,13 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     }
 }
 
-extension TodooBluetoothManager: CBCentralManagerDelegate {
+extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             appendLog("蓝牙已就绪。")
             if automaticSendPayload != nil, !isScanning {
-                startDiscovery()
+                resumeAutomaticSend()
                 return
             }
             if shouldMaintainConnection, let activePeripheral,
@@ -809,14 +874,31 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
                 scheduleReconnect(to: activePeripheral, delayNanoseconds: 0)
             }
         case .poweredOff:
+            if automaticTransferContinuation != nil {
+                fail("蓝牙已关闭，无法在后台更新卡片。")
+                return
+            }
             statusText = "蓝牙已关闭"
             stopDiscovery()
             isConnected = false
             isConnecting = false
         case .unauthorized:
+            if automaticTransferContinuation != nil {
+                fail("请允许 TodooCard 使用蓝牙。")
+                return
+            }
             statusText = "没有蓝牙权限"
         case .unsupported:
+            if automaticTransferContinuation != nil {
+                fail("此设备不支持蓝牙。")
+                return
+            }
             statusText = "此设备不支持蓝牙"
+        case .resetting:
+            if automaticSendPayload != nil {
+                stopDiscovery()
+                statusText = "正在等待蓝牙恢复…"
+            }
         default:
             break
         }
@@ -902,6 +984,11 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
         }
         appendLog("设备已断开：\(error?.localizedDescription ?? "正常断开")")
         if wasSending { errorMessage = "传输过程中蓝牙连接断开。" }
+        if wasSending {
+            finishAutomaticTransfer(
+                .failure(AutomaticUpdateError.transferFailed("传输过程中蓝牙连接断开。"))
+            )
+        }
         if wasRecoveringTransfer {
             appendLog("正在为待发送图片恢复有效的 GATT 会话。")
         }
@@ -914,7 +1001,7 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
     }
 }
 
-extension TodooBluetoothManager: CBPeripheralDelegate {
+extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error { fail("发现服务失败：\(error.localizedDescription)"); return }
         guard let services = peripheral.services else { fail("设备没有返回 GATT 服务。"); return }
