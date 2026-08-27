@@ -30,6 +30,10 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     @Published var errorMessage: String?
 
     var isBusy: Bool { isConnecting || isPreparingTransfer || isSending }
+    var rememberedAutomationDeviceName: String? {
+        guard preferredDeviceIdentifier != nil else { return nil }
+        return UserDefaults.standard.string(forKey: Self.preferredDeviceNameKey) ?? "TodooCard"
+    }
 
     private enum Phase: Equatable {
         case idle
@@ -56,6 +60,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var batteryCharacteristic: CBCharacteristic?
     private var selectedProfile: TransferProfile?
     private var pendingPayload: Data?
+    private var automaticSendPayload: Data?
     private var pendingControlWrite: PendingControlWrite?
     private var phase = Phase.idle
 
@@ -92,12 +97,66 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var transferID = UUID()
 
+    private static let preferredDeviceIdentifierKey = "TodooCard.preferredDeviceIdentifier"
+    private static let preferredDeviceNameKey = "TodooCard.preferredDeviceName"
+
+    private var preferredDeviceIdentifier: UUID? {
+        guard let value = UserDefaults.standard.string(forKey: Self.preferredDeviceIdentifierKey)
+        else { return nil }
+        return UUID(uuidString: value)
+    }
+
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
     func beginDiscovery() {
+        automaticSendPayload = nil
+        isPreparingTransfer = false
+        startDiscovery()
+    }
+
+    func sendAutomatically(_ payload: Data) {
+        errorMessage = nil
+        guard !payload.isEmpty else {
+            fail("不能发送空 Payload。")
+            return
+        }
+        guard !isBusy else {
+            errorMessage = "TodooCard 正在执行另一项操作，请稍后重新运行快捷指令。"
+            return
+        }
+        if isConnected {
+            send(payload)
+            return
+        }
+        guard preferredDeviceIdentifier != nil else {
+            fail("尚未设置自动化设备。请先在 App 中手动选择卡片并成功发送一次。")
+            return
+        }
+
+        stopDiscovery()
+        automaticSendPayload = payload
+        isPreparingTransfer = true
+        switch central.state {
+        case .poweredOn:
+            startDiscovery()
+        case .unknown, .resetting:
+            statusText = "正在等待蓝牙就绪…"
+            appendLog("快捷指令图片已就绪；等待 CoreBluetooth 初始化。")
+        case .poweredOff:
+            fail("请先在系统设置中打开蓝牙。")
+        case .unauthorized:
+            fail("请允许 TodooCard 使用蓝牙。")
+        case .unsupported:
+            fail("此设备不支持蓝牙。")
+        @unknown default:
+            fail("无法初始化蓝牙。")
+        }
+    }
+
+    private func startDiscovery() {
         errorMessage = nil
         guard central.state == .poweredOn else {
             fail("请先在系统设置中打开蓝牙，并允许 TodooCard 使用蓝牙。")
@@ -116,6 +175,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.central.stopScan()
             self.isScanning = false
+            if self.automaticSendPayload != nil {
+                self.automaticSendPayload = nil
+                self.fail("没有找到上次成功使用的 TodooCard。请确认卡片已开机并靠近 iPhone。")
+                return
+            }
             if self.devices.isEmpty {
                 self.statusText = "没有找到兼容设备"
                 self.appendLog("扫描结束，未发现兼容广播。")
@@ -191,7 +255,9 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     func disconnect() {
         shouldMaintainConnection = false
+        automaticSendPayload = nil
         reconnectAttempts = 0
+        stopDiscovery()
         windowTask?.cancel()
         deadlineTask?.cancel()
         controlFallbackTask?.cancel()
@@ -610,7 +676,21 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         progress = 1
         pendingPayload = nil
         statusText = "发送成功，连接已保持"
+        rememberActiveDevice()
         appendLog("收到最终 ACK \(finalAck)；写入 \(dataWrites) 块，重传 \(retransmittedBlocks) 块。")
+    }
+
+    private func rememberActiveDevice() {
+        guard let peripheral = activePeripheral else { return }
+        UserDefaults.standard.set(
+            peripheral.identifier.uuidString,
+            forKey: Self.preferredDeviceIdentifierKey
+        )
+        UserDefaults.standard.set(
+            connectedDeviceName ?? peripheral.name ?? "TodooCard",
+            forKey: Self.preferredDeviceNameKey
+        )
+        appendLog("已记住此设备，后续快捷指令可自动连接。")
     }
 
     private func fail(_ message: String) {
@@ -621,6 +701,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
         pendingControlWrite = nil
+        automaticSendPayload = nil
         pendingPayload = nil
         phase = .idle
         isSending = false
@@ -719,6 +800,10 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
         switch central.state {
         case .poweredOn:
             appendLog("蓝牙已就绪。")
+            if automaticSendPayload != nil, !isScanning {
+                startDiscovery()
+                return
+            }
             if shouldMaintainConnection, let activePeripheral,
                activePeripheral.state != .connected {
                 scheduleReconnect(to: activePeripheral, delayNanoseconds: 0)
@@ -766,7 +851,16 @@ extension TodooBluetoothManager: CBCentralManagerDelegate {
             appendLog("发现 \(name)，RSSI \(RSSI)，固件 0x\(String(format: "%02X", advertisement.firmwareVersion))。")
         }
         devices.sort { $0.rssi > $1.rssi }
-        statusText = "发现 \(devices.count) 台兼容设备"
+        if let payload = automaticSendPayload,
+           peripheral.identifier == preferredDeviceIdentifier {
+            automaticSendPayload = nil
+            appendLog("找到已记住的自动化设备，开始连接并发送。")
+            connectAndSend(deviceID: peripheral.identifier, payload: payload)
+        } else if automaticSendPayload != nil {
+            statusText = "正在查找已记住的卡片…"
+        } else {
+            statusText = "发现 \(devices.count) 台兼容设备"
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

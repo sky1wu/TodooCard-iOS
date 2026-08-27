@@ -1,3 +1,4 @@
+import Combine
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -11,6 +12,7 @@ struct ContentView: View {
   @StateObject private var editor = EditorModel()
   @StateObject private var bluetooth = TodooBluetoothManager()
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.scenePhase) private var scenePhase
 
   @State private var selectedPhoto: PhotosPickerItem?
   @State private var showPhotoPicker = false
@@ -19,6 +21,8 @@ struct ContentView: View {
   @State private var showDiagnostics = false
   @State private var showRemoveConfirmation = false
   @State private var isImporting = false
+  @State private var isHandlingShortcutRequest = false
+  @State private var shouldAutomaticallySendShortcutImage = false
 
   var body: some View {
     NavigationStack {
@@ -94,6 +98,30 @@ struct ContentView: View {
       guard status.hasPrefix("发送成功") else { return }
       UINotificationFeedbackGenerator().notificationOccurred(.success)
       UIAccessibility.post(notification: .announcement, argument: "图片已成功发送到卡片")
+    }
+    .onAppear {
+      handleShortcutRequestIfNeeded()
+      Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        handleShortcutRequestIfNeeded()
+      }
+    }
+    .onChange(of: scenePhase) { phase in
+      if phase == .active { handleShortcutRequestIfNeeded() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: ShortcutInbox.didReceiveRequest)) { _ in
+      handleShortcutRequestIfNeeded()
+    }
+    .onChange(of: editor.canSend) { canSend in
+      if canSend { startAutomaticShortcutSendIfReady() }
+    }
+    .onChange(of: editor.errorMessage) { message in
+      if message != nil { shouldAutomaticallySendShortcutImage = false }
+    }
+    .onChange(of: bluetooth.isBusy) { isBusy in
+      guard !isBusy else { return }
+      startAutomaticShortcutSendIfReady()
+      handleShortcutRequestIfNeeded()
     }
   }
 
@@ -248,7 +276,10 @@ struct ContentView: View {
 
   @MainActor
   private func loadPhoto(_ item: PhotosPickerItem) async {
-    defer { isImporting = false }
+    defer {
+      isImporting = false
+      handleShortcutRequestIfNeeded()
+    }
     do {
       guard let data = try await item.loadTransferable(type: Data.self) else {
         throw CocoaError(.fileReadCorruptFile)
@@ -264,7 +295,10 @@ struct ContentView: View {
 
   @MainActor
   private func importFile(_ result: Result<URL, Error>) async {
-    defer { isImporting = false }
+    defer {
+      isImporting = false
+      handleShortcutRequestIfNeeded()
+    }
     do {
       let url = try result.get()
       let accessing = url.startAccessingSecurityScopedResource()
@@ -286,6 +320,54 @@ struct ContentView: View {
     }
     editor.loadImage(data: data)
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+  }
+
+  private func handleShortcutRequestIfNeeded() {
+    guard !isHandlingShortcutRequest, !isImporting, !bluetooth.isBusy else { return }
+
+    let request: PendingShortcutRequest
+    do {
+      guard let pendingRequest = try ShortcutInbox.takeRequest() else { return }
+      request = pendingRequest
+    } catch {
+      editor.errorMessage = "读取快捷指令图片失败：\(error.localizedDescription)"
+      return
+    }
+
+    isHandlingShortcutRequest = true
+    isImporting = true
+    showDevicePicker = false
+    bluetooth.stopDiscovery()
+    Task { @MainActor in
+      do {
+        let data = try await Task.detached(priority: .userInitiated) {
+          try ShortcutInbox.loadAndRemoveImage(for: request)
+        }.value
+        shouldAutomaticallySendShortcutImage = true
+        editor.loadImage(data: data, resetEffects: true)
+        if editor.errorMessage != nil {
+          shouldAutomaticallySendShortcutImage = false
+        } else {
+          UIImpactFeedbackGenerator(style: .light).impactOccurred()
+          startAutomaticShortcutSendIfReady()
+        }
+      } catch {
+        shouldAutomaticallySendShortcutImage = false
+        editor.errorMessage = "读取快捷指令图片失败：\(error.localizedDescription)"
+      }
+      isImporting = false
+      isHandlingShortcutRequest = false
+      handleShortcutRequestIfNeeded()
+    }
+  }
+
+  private func startAutomaticShortcutSendIfReady() {
+    guard shouldAutomaticallySendShortcutImage,
+          !bluetooth.isBusy,
+          editor.canSend,
+          let payload = editor.payload else { return }
+    shouldAutomaticallySendShortcutImage = false
+    bluetooth.sendAutomatically(payload)
   }
 }
 
@@ -992,6 +1074,10 @@ private struct DiagnosticsView: View {
         Section("设备") {
           LabeledContent("连接", value: bluetooth.connectedDeviceName ?? "未连接")
           LabeledContent("电量", value: bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
+          LabeledContent(
+            "快捷指令设备",
+            value: bluetooth.rememberedAutomationDeviceName ?? "未设置（先手动发送一次）"
+          )
           LabeledContent("厂商 / 屏幕", value: "0x5053 / 0x134C")
         }
 

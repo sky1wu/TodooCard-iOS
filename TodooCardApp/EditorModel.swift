@@ -36,7 +36,7 @@ final class EditorModel: ObservableObject {
             || abs(focusY - 50) > 0.001
     }
 
-    func loadImage(data: Data) {
+    func loadImage(data: Data, resetEffects: Bool = false) {
         guard data.count <= Self.maximumImageBytes else {
             errorMessage = "图片超过 100 MB 安全限制。"
             return
@@ -61,6 +61,10 @@ final class EditorModel: ObservableObject {
         zoom = 1
         focusX = 50
         focusY = 50
+        if resetEffects {
+            algorithm = .floydSteinberg
+            brightnessCompensation = 0
+        }
         errorMessage = nil
         scheduleProcessing()
     }

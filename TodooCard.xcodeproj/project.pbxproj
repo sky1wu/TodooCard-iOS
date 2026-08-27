@@ -18,6 +18,7 @@
 		A00000000000000000000009 /* PayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* PayloadBuilder.swift */; };
 		A0000000000000000000000A /* TransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* TransferProtocol.swift */; };
 		A0000000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* Assets.xcassets */; };
+		A0000000000000000000000C /* Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000E /* Shortcuts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 		B0000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0000000000000000000000C /* TodooCard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TodooCard.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B0000000000000000000000E /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +66,7 @@
 				B00000000000000000000003 /* EditorModel.swift */,
 				B00000000000000000000004 /* ImageProcessor.swift */,
 				B00000000000000000000005 /* TodooBluetoothManager.swift */,
+				B0000000000000000000000E /* Shortcuts.swift */,
 				B0000000000000000000000D /* Assets.xcassets */,
 				B0000000000000000000000B /* Info.plist */,
 			);
@@ -170,6 +173,7 @@
 				A00000000000000000000008 /* Dithering.swift in Sources */,
 				A00000000000000000000009 /* PayloadBuilder.swift in Sources */,
 				A0000000000000000000000A /* TransferProtocol.swift in Sources */,
+				A0000000000000000000000C /* Shortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
