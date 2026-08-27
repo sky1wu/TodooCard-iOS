@@ -36,15 +36,15 @@ enum ImageProcessorError: Error, LocalizedError {
 }
 
 enum ImageProcessor {
-    // Keep protocol colors untouched while making the on-phone preview resemble
-    // the darker, narrower gamut of the physical six-color e-paper panel.
+    // Keep protocol colors untouched. These screen-facing values sit between the
+    // native RGB colors and the darker measured panel colors for a closer preview.
     private static let panelPreviewPalette: [UInt8: (red: UInt8, green: UInt8, blue: UInt8)] = [
-        0: (31, 34, 38),
-        1: (185, 199, 201),
-        2: (193, 187, 30),
-        3: (98, 32, 30),
-        5: (35, 63, 142),
-        6: (53, 86, 58),
+        0: (11, 12, 13),
+        1: (231, 235, 236),
+        2: (233, 231, 11),
+        3: (200, 11, 11),
+        5: (12, 22, 215),
+        6: (19, 196, 20),
     ]
 
     static func process(_ request: ImageProcessingRequest) throws -> ImageProcessingResult {

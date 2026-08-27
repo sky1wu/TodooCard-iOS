@@ -200,63 +200,66 @@ struct ContentView: View {
     }
 
     private var sendBar: some View {
-        Button(action: primaryAction) {
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(sendButtonBackground)
-
-                if bluetooth.isSending {
-                    GeometryReader { proxy in
-                        Rectangle()
-                            .fill(Color.white.opacity(0.2))
-                            .frame(width: proxy.size.width * min(1, max(0, bluetooth.progress)))
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .animation(.linear(duration: 0.15), value: bluetooth.progress)
-                }
-
-                HStack(spacing: 9) {
-                    sendButtonIcon
-                        .frame(width: 20, height: 20)
-
-                    Text(primaryButtonLabel)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
+        HStack {
+            Button(action: primaryAction) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(sendButtonBackground)
 
                     if bluetooth.isSending {
-                        Text(bluetooth.progress, format: .percent.precision(.fractionLength(0)))
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                    } else if !bluetooth.isBusy && bluetooth.isConnected {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .opacity(0.8)
+                        GeometryReader { proxy in
+                            Rectangle()
+                                .fill(Color.white.opacity(0.2))
+                                .frame(width: proxy.size.width * min(1, max(0, bluetooth.progress)))
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .animation(.linear(duration: 0.15), value: bluetooth.progress)
                     }
+
+                    HStack(spacing: 9) {
+                        sendButtonIcon
+                            .frame(width: 20, height: 20)
+
+                        Text(primaryButtonLabel)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+
+                        Spacer(minLength: 8)
+
+                        if bluetooth.isSending {
+                            Text(bluetooth.progress, format: .percent.precision(.fractionLength(0)))
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                        } else if !bluetooth.isBusy && bluetooth.isConnected {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .opacity(0.8)
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 15)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 15)
+                .frame(width: 232, height: 46)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                }
+                .shadow(
+                    color: sendButtonEnabled ? Color.accentColor.opacity(0.28) : .clear,
+                    radius: 8,
+                    y: 3
+                )
+                .opacity(sendButtonEnabled || bluetooth.isBusy ? 1 : 0.55)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-            }
-            .shadow(
-                color: sendButtonEnabled ? Color.accentColor.opacity(0.28) : .clear,
-                radius: 8,
-                y: 3
+            .buttonStyle(.plain)
+            .disabled(!sendButtonEnabled)
+            .accessibilityValue(
+                bluetooth.isSending
+                    ? bluetooth.progress.formatted(.percent.precision(.fractionLength(0)))
+                    : ""
             )
-            .opacity(sendButtonEnabled || bluetooth.isBusy ? 1 : 0.55)
         }
-        .buttonStyle(.plain)
-        .disabled(!sendButtonEnabled)
-        .accessibilityValue(
-            bluetooth.isSending
-                ? bluetooth.progress.formatted(.percent.precision(.fractionLength(0)))
-                : ""
-        )
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 8)
@@ -390,7 +393,7 @@ private struct PreviewCanvas: View {
                 } else if let preview = editor.previewImage {
                     Image(uiImage: preview)
                         .resizable()
-                        .interpolation(.none)
+                        .interpolation(.high)
                         .scaledToFill()
                 }
 
