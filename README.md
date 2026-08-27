@@ -1,5 +1,7 @@
 # TodooCard iOS
 
+[![Build](https://github.com/sky1wu/TodooCard-iOS/actions/workflows/build.yml/badge.svg)](https://github.com/sky1wu/TodooCard-iOS/actions/workflows/build.yml)
+
 TodooCard/T3 的原生 iOS 图片发送器。图片的解码、裁切、旋转、六色抖动、Payload
 构建和 SHA-256 校验全部在手机本地完成，不依赖后端。
 
@@ -43,6 +45,12 @@ swift run TodooCoreChecks
 Payload: 218893 bytes
 SHA-256: 52c109f0d80d7205c62f4619f2e0621e7df0f3d517507f681f4f05d9e567834d
 ```
+
+## 持续集成
+
+`.github/workflows/build.yml` 会在推送到 `main`、向 `main` 提交 Pull Request，或手动
+触发时运行。工作流使用 GitHub 托管的 macOS runner，先执行核心固定向量校验，再以
+iOS Simulator 为目标执行无签名的完整 `xcodebuild`。真机 BLE 交互仍需人工验收。
 
 ## 目录
 
