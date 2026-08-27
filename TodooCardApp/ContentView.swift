@@ -610,25 +610,27 @@ private struct PreviewCanvas: View {
       let cardSize = CGSize(width: cardWidth, height: cardHeight)
       let interactiveZoom = min(4, max(1, editor.zoom * Double(cropState.magnification)))
       let pose = devicePose(cardSize: cardSize)
-      let normalizedYaw = normalizedDegrees(pose.yaw)
-      let showingBack = normalizedYaw > 90 && normalizedYaw < 270
+      let faceVisibility = deviceFaceVisibility(yaw: pose.yaw)
+      let showingBack = cos(pose.yaw * .pi / 180) < 0
       let threeDGesture = device3DGesture(in: cardSize)
+      let screenFrame = CGRect(
+        x: (proxy.size.width - cardWidth) / 2 + screenSideInset,
+        y: (proxy.size.height - cardHeight) / 2 + screenTopInset,
+        width: screenWidth,
+        height: screenHeight
+      )
 
       ZStack {
-        Color.clear
-          .contentShape(Rectangle())
-          .simultaneousGesture(threeDGesture)
-
         ZStack {
-          DeviceEdgeSurfaces(
-            size: cardSize,
-            thickness: cardThickness,
-            cornerRadius: cardCornerRadius,
-            pitch: pose.pitch,
-            yaw: pose.yaw
-          )
-
           ZStack {
+            DeviceThicknessFaces(
+              size: cardSize,
+              thickness: cardThickness,
+              cornerRadius: cardCornerRadius,
+              pitch: pose.pitch,
+              yaw: pose.yaw
+            )
+
             ZStack(alignment: .top) {
               RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                 .fill(AppTheme.deviceShell)
@@ -636,7 +638,6 @@ private struct PreviewCanvas: View {
                   RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                     .stroke(Color.white.opacity(0.72), lineWidth: 1)
                 }
-                .simultaneousGesture(threeDGesture)
 
               DeviceMatteTexture(cornerRadius: cardCornerRadius)
 
@@ -688,7 +689,7 @@ private struct PreviewCanvas: View {
               )
             }
             .frame(width: cardWidth, height: cardHeight)
-            .opacity(showingBack ? 0 : 1)
+            .opacity(faceVisibility.front)
             .allowsHitTesting(!showingBack)
 
             ZStack {
@@ -700,10 +701,8 @@ private struct PreviewCanvas: View {
               )
             }
             .frame(width: cardWidth, height: cardHeight)
-            .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-            .simultaneousGesture(threeDGesture)
             .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
-            .opacity(showingBack ? 1 : 0)
+            .opacity(faceVisibility.back)
             .allowsHitTesting(showingBack)
           }
           .frame(width: cardWidth, height: cardHeight)
@@ -745,6 +744,13 @@ private struct PreviewCanvas: View {
         }
         .accessibilityAction(named: "还原构图") { editor.resetFraming() }
         .accessibilityAction(named: "翻转设备") { flipDevice() }
+
+        Color.clear
+          .contentShape(
+            Preview3DInteractionShape(excludedRect: showingBack ? nil : screenFrame),
+            eoFill: true
+          )
+          .simultaneousGesture(threeDGesture)
       }
     }
   }
@@ -776,9 +782,12 @@ private struct PreviewCanvas: View {
         guard cardSize.width > 0 else { return }
         let actual = value.translation.width
         let predicted = value.predictedEndTranslation.width
-        let projected = abs(predicted) > abs(actual) ? predicted : actual
-        let delta = min(180, max(-180, Double(projected / cardSize.width) * 180))
-        let target = ((settledYaw + delta) / 180).rounded() * 180
+        let crossedDistanceThreshold = abs(actual) >= cardSize.width * 0.3
+        let crossedFlickThreshold = abs(actual) >= cardSize.width * 0.15
+          && abs(predicted) >= cardSize.width * 0.65
+        guard crossedDistanceThreshold || crossedFlickThreshold else { return }
+        let direction: Double = actual >= 0 ? 1 : -1
+        let target = settledYaw + direction * 180
         if reduceMotion {
           settledYaw = target
         } else {
@@ -794,8 +803,8 @@ private struct PreviewCanvas: View {
       return (0, settledYaw)
     }
     let yawDelta = min(
-      180,
-      max(-180, Double(deviceDragState.translation.width / cardSize.width) * 180)
+      88,
+      max(-88, Double(deviceDragState.translation.width / cardSize.width) * 90)
     )
     let vertical = min(
       1,
@@ -804,9 +813,10 @@ private struct PreviewCanvas: View {
     return (pitch: Double(-vertical * 11), yaw: settledYaw + yawDelta)
   }
 
-  private func normalizedDegrees(_ degrees: Double) -> Double {
-    let result = degrees.truncatingRemainder(dividingBy: 360)
-    return result >= 0 ? result : result + 360
+  private func deviceFaceVisibility(yaw: Double) -> (front: Double, back: Double) {
+    let cosine = cos(yaw * .pi / 180)
+    let front = min(1, max(0, (cosine + 0.08) / 0.16))
+    return (front, 1 - front)
   }
 
   private func shadowOffset(for pose: (pitch: Double, yaw: Double)) -> CGSize {
@@ -829,7 +839,20 @@ private struct PreviewCanvas: View {
   }
 }
 
-private struct DeviceEdgeSurfaces: View {
+private struct Preview3DInteractionShape: Shape {
+  let excludedRect: CGRect?
+
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.addRect(rect)
+    if let excludedRect {
+      path.addRect(excludedRect)
+    }
+    return path
+  }
+}
+
+private struct DeviceThicknessFaces: View {
   let size: CGSize
   let thickness: CGFloat
   let cornerRadius: CGFloat
@@ -839,31 +862,33 @@ private struct DeviceEdgeSurfaces: View {
   var body: some View {
     let pitchRadians = pitch * .pi / 180
     let yawRadians = yaw * .pi / 180
-    let horizontalDepth = abs(CGFloat(sin(yawRadians))) * thickness
-    let verticalDepth = abs(CGFloat(sin(pitchRadians))) * thickness
-    let projectedWidth = abs(CGFloat(cos(yawRadians))) * size.width
-    let projectedHeight = abs(CGFloat(cos(pitchRadians))) * size.height
+    let horizontalVisibility = min(1, abs(sin(yawRadians)) * 3.5)
+    let verticalVisibility = min(1, abs(sin(pitchRadians)) * 4)
+    let showingLeftEdge = sin(yawRadians) >= 0
+    let showingTopEdge = sin(pitchRadians) >= 0
 
     ZStack {
-      if horizontalDepth > 0.1 {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .fill(edgeGradient)
-          .frame(width: max(1, horizontalDepth), height: projectedHeight)
-          .offset(
-            x: (sin(yawRadians) >= 0 ? -1 : 1)
-              * (projectedWidth / 2 + horizontalDepth / 2)
-          )
-      }
+      RoundedRectangle(cornerRadius: min(cornerRadius, thickness / 2), style: .continuous)
+        .fill(edgeGradient)
+        .frame(width: thickness, height: max(1, size.height - cornerRadius * 0.35))
+        .rotation3DEffect(
+          .degrees(showingLeftEdge ? -90 : 90),
+          axis: (x: 0, y: 1, z: 0),
+          perspective: 0
+        )
+        .offset(x: showingLeftEdge ? -size.width / 2 : size.width / 2)
+        .opacity(horizontalVisibility)
 
-      if verticalDepth > 0.1 {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .fill(edgeGradient)
-          .frame(width: projectedWidth, height: max(1, verticalDepth))
-          .offset(
-            y: (sin(pitchRadians) >= 0 ? 1 : -1)
-              * (projectedHeight / 2 + verticalDepth / 2)
-          )
-      }
+      RoundedRectangle(cornerRadius: min(cornerRadius, thickness / 2), style: .continuous)
+        .fill(edgeGradient)
+        .frame(width: max(1, size.width - cornerRadius * 0.35), height: thickness)
+        .rotation3DEffect(
+          .degrees(showingTopEdge ? -90 : 90),
+          axis: (x: 1, y: 0, z: 0),
+          perspective: 0
+        )
+        .offset(y: showingTopEdge ? -size.height / 2 : size.height / 2)
+        .opacity(verticalVisibility)
     }
     .frame(width: size.width, height: size.height)
     .allowsHitTesting(false)
@@ -913,7 +938,7 @@ private struct DeviceMatteTexture: View {
   let cornerRadius: CGFloat
 
   var body: some View {
-    Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: true) { context, size in
+    Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: false) { context, size in
       let spacing = max(3, size.width / 38)
       let grain = max(0.45, size.width / 420)
       let columns = max(1, Int(ceil(size.width / spacing)))
