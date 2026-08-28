@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.todoocard.sender",
       "developerName": "Sky1Wu",
       "subtitle": "把图片处理并发送到 TodooCard 墨水屏",
-      "localizedDescription": "在 iPhone 上完成裁切、抖动与六色量化，再通过蓝牙把图片发送到 TodooCard / T3 墨水屏卡片。支持 Bing 每日壁纸、快捷指令自动化与系统分享扩展，所有图片处理都在本机完成。",
+      "localizedDescription": "在 iPhone 上完成裁切、抖动与六色量化，再通过蓝牙把图片发送到 TodooCard / T3 墨水屏卡片。支持 Bing 每日壁纸、今日健康摘要、快捷指令自动化与系统分享扩展，所有图片处理都在本机完成。",
       "iconURL": "https://raw.githubusercontent.com/sky1wu/TodooCard-iOS/main/TodooCardApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
       "category": "utilities",
       "versions": [
@@ -28,10 +28,12 @@
       ],
       "appPermissions": {
         "entitlements": [
-          "com.apple.security.application-groups"
+          "com.apple.security.application-groups",
+          "com.apple.developer.healthkit"
         ],
         "privacy": {
           "NSBluetoothAlwaysUsageDescription": "用于连接 TodooCard 并发送在本机处理好的图片。",
+          "NSHealthShareUsageDescription": "用于读取今天的活动圆环、睡眠、步数和静息心率，在本机排版成健康摘要卡片。数据只在本机处理，不会上传。",
           "NSPhotoLibraryUsageDescription": "用于选择要显示在 TodooCard 上的图片。",
           "NSMotionUsageDescription": "用于在首页读取设备姿态，让卡片预览随手机倾斜产生光影变化。"
         }

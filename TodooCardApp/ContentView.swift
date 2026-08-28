@@ -202,6 +202,15 @@ struct ContentView: View {
           }
           .buttonStyle(OutlinedActionButtonStyle())
           .accessibilityHint("下载今天的竖屏壁纸并打开卡片预览")
+
+          Button(action: beginHealthImport) {
+            Label("生成今日健康摘要", systemImage: "heart.text.square.fill")
+              .font(.subheadline.weight(.semibold))
+              .frame(maxWidth: .infinity)
+              .frame(minHeight: 48)
+          }
+          .buttonStyle(OutlinedActionButtonStyle())
+          .accessibilityHint("读取「健康」中的活动圆环、睡眠与步数，排版成卡片并打开预览")
         }
 
         if !recents.items.isEmpty {
@@ -273,6 +282,9 @@ struct ContentView: View {
     Menu {
       Button(action: beginBingImport) {
         Label("Bing 每日壁纸", systemImage: "globe.asia.australia.fill")
+      }
+      Button(action: beginHealthImport) {
+        Label("今日健康摘要", systemImage: "heart.text.square.fill")
       }
       Button {
         showPhotoPicker = true
@@ -461,6 +473,28 @@ struct ContentView: View {
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "获取 Bing 每日壁纸失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func beginHealthImport() {
+    importStatusText = "正在读取健康数据"
+    isImporting = true
+    Task { await loadHealthSummary() }
+  }
+
+  @MainActor
+  private func loadHealthSummary() async {
+    defer { isImporting = false }
+    do {
+      try await HealthSummaryReader.requestAuthorization()
+      let snapshot = try await HealthSummaryReader.fetchToday()
+      let data = try HealthCardRenderer.renderPNG(snapshot)
+      // 这张图是本机排版出来的纯色文字，抖动只会把笔画糊成噪点，直接按最近色量化。
+      // 写全类型名：可选参数上的 .none 会被当成 Optional.none。
+      if editor.loadImage(data: data, preferredAlgorithm: DitherAlgorithm.none) { isEditing = true }
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    } catch {
+      editor.errorMessage = "生成今日健康摘要失败：\(error.localizedDescription)"
     }
   }
 

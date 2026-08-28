@@ -34,6 +34,10 @@
 		A00000000000000000000010 /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
 		A1000000000000000000000B /* DeviceScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* DeviceScreenSnapshot.swift */; };
 		A1000000000000000000000C /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
+		A00000000000000000000011 /* HealthSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* HealthSummary.swift */; };
+		A00000000000000000000012 /* HealthCardRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* HealthCardRenderer.swift */; };
+		A00000000000000000000013 /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* HealthMetrics.swift */; };
+		A1000000000000000000000D /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* HealthMetrics.swift */; };
 		A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* TodooCardShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -81,6 +85,9 @@
 		B00000000000000000000011 /* TodooCard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCard.entitlements; sourceTree = "<group>"; };
 		B00000000000000000000012 /* DeviceScreenSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScreenSnapshot.swift; sourceTree = "<group>"; };
 		B00000000000000000000013 /* RecentSendStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSendStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000014 /* HealthSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthSummary.swift; sourceTree = "<group>"; };
+		B00000000000000000000015 /* HealthCardRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthCardRenderer.swift; sourceTree = "<group>"; };
+		B00000000000000000000016 /* HealthMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthMetrics.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000003 /* TodooCardShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCardShareExtension.entitlements; sourceTree = "<group>"; };
@@ -128,6 +135,8 @@
 				B00000000000000000000013 /* RecentSendStore.swift */,
 				B0000000000000000000000E /* Shortcuts.swift */,
 				B0000000000000000000000F /* BingDailyWallpaper.swift */,
+				B00000000000000000000014 /* HealthSummary.swift */,
+				B00000000000000000000015 /* HealthCardRenderer.swift */,
 				B0000000000000000000000D /* Assets.xcassets */,
 				B0000000000000000000000B /* Info.plist */,
 				B00000000000000000000011 /* TodooCard.entitlements */,
@@ -141,6 +150,7 @@
 				B00000000000000000000006 /* CardConstants.swift */,
 				B00000000000000000000007 /* CoverLayout.swift */,
 				B00000000000000000000008 /* Dithering.swift */,
+				B00000000000000000000016 /* HealthMetrics.swift */,
 				B00000000000000000000009 /* PayloadBuilder.swift */,
 				B0000000000000000000000A /* TransferProtocol.swift */,
 			);
@@ -291,6 +301,9 @@
 				A0000000000000000000000A /* TransferProtocol.swift in Sources */,
 				A0000000000000000000000C /* Shortcuts.swift in Sources */,
 				A0000000000000000000000D /* BingDailyWallpaper.swift in Sources */,
+				A00000000000000000000011 /* HealthSummary.swift in Sources */,
+				A00000000000000000000012 /* HealthCardRenderer.swift in Sources */,
+				A00000000000000000000013 /* HealthMetrics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,6 +320,7 @@
 				A10000000000000000000005 /* CardConstants.swift in Sources */,
 				A10000000000000000000006 /* CoverLayout.swift in Sources */,
 				A10000000000000000000007 /* Dithering.swift in Sources */,
+				A1000000000000000000000D /* HealthMetrics.swift in Sources */,
 				A10000000000000000000008 /* PayloadBuilder.swift in Sources */,
 				A10000000000000000000009 /* TransferProtocol.swift in Sources */,
 			);

@@ -112,6 +112,63 @@ func runChecks() throws {
     try check(block.percent == 80 && !block.isLast, "data block progress")
     let missingBlock = try makeDataBlock(payload: payload, index: 3, blockPayloadSize: 4)
     try check(missingBlock == nil, "out-of-range block")
+
+    try runHealthChecks()
+}
+
+private func runHealthChecks() throws {
+    let overachieved = ActivityRingMetric(value: 640, goal: 600)
+    try check(abs(overachieved.fraction - 1) < 0.000_001, "activity ring stops at one turn")
+    try check(overachieved.percent == 107, "activity ring percent")
+    try check(overachieved.isComplete, "activity ring completion")
+    let goalless = ActivityRingMetric(value: 120, goal: 0)
+    try check(goalless.fraction == 0 && goalless.percent == 0, "activity ring without a goal")
+    try check(!ActivityRingMetric(value: .nan, goal: 600).value.isNaN, "activity ring rejects NaN")
+
+    // 7 小时睡眠，深度 1 小时 15 分、核心 4 小时、REM 1 小时 45 分、清醒 15 分、醒来 2 次。
+    let stagedNight = SleepStageTotals(deep: 4_500, core: 14_400, rem: 6_300, awake: 900)
+    try check(stagedNight.hasStageDetail, "staged night has stage detail")
+    try check(abs(stagedNight.asleep - 25_200) < 0.001, "staged night asleep total")
+    try check(abs(stagedNight.inBed - 26_100) < 0.001, "staged night in-bed total")
+    let stagedScore = SleepScoring.score(totals: stagedNight, awakenings: 2)
+    try check(stagedScore.usesStageDetail, "staged score uses stages")
+    try check(stagedScore.value == 90, "staged sleep score")
+    try check(stagedScore.grade == .excellent, "staged sleep grade")
+
+    // 只有 iPhone 记录时拿不到阶段，评分只看时长和连续性。
+    let flatNight = SleepStageTotals(unspecified: 21_600)
+    try check(!flatNight.hasStageDetail, "flat night has no stage detail")
+    let flatScore = SleepScoring.score(totals: flatNight, awakenings: 0)
+    try check(!flatScore.usesStageDetail, "flat score skips stages")
+    try check(flatScore.value == 81 && flatScore.grade == .good, "flat sleep score")
+
+    let oversleep = SleepScoring.score(totals: SleepStageTotals(unspecified: 39_600), awakenings: 0)
+    try check(oversleep.value == 93, "oversleep penalty")
+    let brokenNight = SleepScoring.score(
+        totals: SleepStageTotals(unspecified: 14_400, awake: 5_400),
+        awakenings: 7
+    )
+    try check(brokenNight.value == 38 && brokenNight.grade == .poor, "broken night score")
+    let empty = SleepScoring.score(totals: SleepStageTotals(), awakenings: 0)
+    try check(empty.value == 0 && empty.grade == .poor, "no sleep at all")
+
+    try check(SleepScoring.grade(for: 85) == .excellent, "grade boundary 85")
+    try check(SleepScoring.grade(for: 84) == .good, "grade boundary 84")
+    try check(SleepScoring.grade(for: 70) == .good, "grade boundary 70")
+    try check(SleepScoring.grade(for: 69) == .fair, "grade boundary 69")
+    try check(SleepScoring.grade(for: 55) == .fair, "grade boundary 55")
+    try check(SleepScoring.grade(for: 54) == .poor, "grade boundary 54")
+
+    try check(formatSleepDuration(27_120) == "7 小时 32 分", "sleep duration with minutes")
+    try check(formatSleepDuration(7_200) == "2 小时", "whole-hour sleep duration")
+    try check(formatSleepDuration(2_700) == "45 分", "sub-hour sleep duration")
+    try check(formatSleepDuration(-1) == "0 分", "negative sleep duration")
+    try check(formatCompactDuration(4_500) == "1时15分", "compact duration")
+    try check(formatCompactDuration(900) == "15分", "compact sub-hour duration")
+    try check(formatGroupedNumber(12_486) == "12,486", "grouped thousands")
+    try check(formatGroupedNumber(1_000_000) == "1,000,000", "grouped millions")
+    try check(formatGroupedNumber(486) == "486", "ungrouped hundreds")
+    try check(formatGroupedNumber(0) == "0", "grouped zero")
 }
 
 private func makeReferenceCodes() -> [UInt8] {

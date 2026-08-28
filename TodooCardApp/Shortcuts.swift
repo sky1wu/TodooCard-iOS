@@ -174,6 +174,65 @@ struct SendBingDailyWallpaperIntent: AppIntent {
   }
 }
 
+struct SendHealthSummaryIntent: AppIntent {
+  static let title: LocalizedStringResource = "发送今日健康摘要"
+  static let description = IntentDescription(
+    "读取「健康」中今天的活动圆环、睡眠、步数与静息心率，排版成一张卡片并自动发送到上次成功使用的 TodooCard。"
+  )
+  static let openAppWhenRun = false
+
+  @Parameter(title: "显示效果", default: ShortcutDitherAlgorithm.none)
+  var algorithm: ShortcutDitherAlgorithm
+
+  @Parameter(
+    title: "亮度补偿",
+    description: "-100%–100%，默认 0%",
+    default: 0,
+    controlStyle: .field,
+    inclusiveRange: (-100, 100)
+  )
+  var brightnessPercent: Int
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("生成并发送今日健康摘要") {
+      \.$algorithm
+      \.$brightnessPercent
+    }
+  }
+
+  func perform() async throws -> some IntentResult {
+    // 后台运行时弹不出授权窗口；已经在 App 里授权过就直接读，没授权过让下面的读取报错，
+    // 由错误信息提示用户先打开一次 App。
+    try? await HealthSummaryReader.requestAuthorization()
+    let snapshot = try await HealthSummaryReader.fetchToday()
+    let cardData = try HealthCardRenderer.renderPNG(snapshot)
+    let configuration = AutomaticImageConfiguration(
+      rotation: 0,
+      focusX: 50,
+      focusY: 50,
+      zoom: 1,
+      algorithm: algorithm.coreValue,
+      // 纯色排版不需要抖动，强度固定 100% 只是让最近色量化按原样走。
+      strength: 1,
+      brightnessCompensation: Float(brightnessPercent) / 100
+    )
+    let processed = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.process(cardData, configuration: configuration)
+    }.value
+
+    let bluetooth = await TodooBluetoothManager.shared
+    try await bluetooth.sendAutomaticallyAndWait(processed.payload)
+    DeviceScreenSnapshot.save(processed.preview)
+    RecentSendStore.record(
+      sourceData: cardData,
+      configuration: configuration,
+      preview: processed.preview,
+      payload: processed.payload
+    )
+    return .result()
+  }
+}
+
 struct TodooCardShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(
@@ -193,6 +252,15 @@ struct TodooCardShortcuts: AppShortcutsProvider {
       ],
       shortTitle: "发送 Bing 每日壁纸",
       systemImageName: "globe.asia.australia.fill"
+    )
+    AppShortcut(
+      intent: SendHealthSummaryIntent(),
+      phrases: [
+        "用 \(.applicationName) 发送今日健康摘要",
+        "让 \(.applicationName) 显示健康数据",
+      ],
+      shortTitle: "发送今日健康摘要",
+      systemImageName: "heart.text.square.fill"
     )
   }
 

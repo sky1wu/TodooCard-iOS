@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于连接 TodooCard 并发送在本机处理好的图片。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>用于读取今天的活动圆环、睡眠、步数和静息心率，在本机排版成健康摘要卡片。数据只在本机处理，不会上传。</string>
 	<key>NSMotionUsageDescription</key>
 	<string>用于在首页读取设备姿态，让卡片预览随手机倾斜产生光影变化。</string>
 	<key>NSPhotoLibraryUsageDescription</key>

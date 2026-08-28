@@ -37,8 +37,10 @@ final class EditorModel: ObservableObject {
     }
 
     /// 返回是否真的换上了新图片；失败时保留上一张图片和它的编辑状态。
+    /// `preferredAlgorithm` 给的是这张图更合适的量化方式（例如本机生成的健康摘要要用最近色
+    /// 保住文字边缘），只在换图这一刻覆盖一次，之后用户仍然可以自己改。
     @discardableResult
-    func loadImage(data: Data) -> Bool {
+    func loadImage(data: Data, preferredAlgorithm: DitherAlgorithm? = nil) -> Bool {
         guard data.count <= Self.maximumImageBytes else {
             errorMessage = "图片超过 100 MB 安全限制。"
             return false
@@ -63,6 +65,7 @@ final class EditorModel: ObservableObject {
         zoom = 1
         focusX = 50
         focusY = 50
+        if let preferredAlgorithm { algorithm = preferredAlgorithm }
         errorMessage = nil
         scheduleProcessing()
         return true
