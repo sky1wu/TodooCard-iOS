@@ -25,6 +25,13 @@ private struct OutgoingSend {
   let recentID: UUID?
 }
 
+/// 轻点“最近发送”进入编辑器时保留来源。只要用户没有改动画面参数，再次发送就应当
+/// 更新原记录的时间，而不是把同一张图另存一份。
+private struct RecentEditorOrigin {
+  let id: UUID
+  let configuration: AutomaticImageConfiguration
+}
+
 struct ContentView: View {
   @StateObject private var editor = EditorModel()
   @StateObject private var bluetooth = TodooBluetoothManager.shared
@@ -46,6 +53,7 @@ struct ContentView: View {
   @State private var isEditing = false
   /// Bing 壁纸、健康摘要等生成内容可以正常预览和发送，但不进入“最近发送”。
   @State private var recordsCurrentImage = false
+  @State private var recentEditorOrigin: RecentEditorOrigin?
   @State private var outgoing: OutgoingSend?
   /// 发送成功后让主页的立体卡片重新读一次画面快照。
   @State private var screenRefreshToken = 0
@@ -180,7 +188,7 @@ struct ContentView: View {
           ResumeEditingCard(
             editor: editor,
             resume: { isEditing = true },
-            discard: editor.clearImage
+            discard: discardCurrentImage
           )
         }
 
@@ -304,7 +312,7 @@ struct ContentView: View {
       Divider()
       Button(role: .destructive) {
         isEditing = false
-        editor.clearImage()
+        discardCurrentImage()
       } label: {
         Label("关闭当前图片", systemImage: "xmark.circle")
       }
@@ -330,12 +338,13 @@ struct ContentView: View {
 
   private func primaryAction() {
     guard let payload = editor.payload, let source = editor.sourceImage else { return }
+    let recentID = unchangedRecentID(for: editor.configuration)
     beginSend(
       payload: payload,
       preview: editor.previewImage,
-      source: recordsCurrentImage ? source : nil,
+      source: recordsCurrentImage && recentID == nil ? source : nil,
       configuration: editor.configuration,
-      recentID: nil
+      recentID: recentID
     )
   }
 
@@ -348,8 +357,30 @@ struct ContentView: View {
     }
     editor.restore(source: draft.source, configuration: draft.configuration)
     recordsCurrentImage = true
+    recentEditorOrigin = RecentEditorOrigin(id: item.id, configuration: draft.configuration)
     isEditing = true
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+  }
+
+  /// 历史图片恢复后若未改动画面，只把原记录置顶。改过构图或显示效果则仍作为新画面记录。
+  private func unchangedRecentID(for configuration: AutomaticImageConfiguration) -> UUID? {
+    guard let origin = recentEditorOrigin,
+          recents.items.contains(where: { $0.id == origin.id }),
+          configuration.rotation == origin.configuration.rotation,
+          configuration.focusX == origin.configuration.focusX,
+          configuration.focusY == origin.configuration.focusY,
+          configuration.zoom == origin.configuration.zoom,
+          configuration.algorithm.rawValue == origin.configuration.algorithm.rawValue,
+          configuration.strength == origin.configuration.strength,
+          configuration.brightnessCompensation == origin.configuration.brightnessCompensation
+    else { return nil }
+    return origin.id
+  }
+
+  private func discardCurrentImage() {
+    recentEditorOrigin = nil
+    recordsCurrentImage = false
+    editor.clearImage()
   }
 
   /// 直接把当初发出的 payload 再发一次，画面与那次发送完全一致，也不必回到编辑器。
@@ -428,6 +459,7 @@ struct ContentView: View {
         throw CocoaError(.fileReadCorruptFile)
       }
       if editor.loadImage(data: data) {
+        recentEditorOrigin = nil
         recordsCurrentImage = true
         isEditing = true
       }
@@ -450,6 +482,7 @@ struct ContentView: View {
         try Data(contentsOf: url)
       }.value
       if editor.loadImage(data: data) {
+        recentEditorOrigin = nil
         recordsCurrentImage = true
         isEditing = true
       }
@@ -465,6 +498,7 @@ struct ContentView: View {
       return
     }
     if editor.loadImage(data: data) {
+      recentEditorOrigin = nil
       recordsCurrentImage = true
       isEditing = true
     }
@@ -483,6 +517,7 @@ struct ContentView: View {
     do {
       let wallpaper = try await BingDailyWallpaperClient.fetchToday()
       if editor.loadImage(data: wallpaper.data) {
+        recentEditorOrigin = nil
         recordsCurrentImage = false
         isEditing = true
       }
@@ -508,6 +543,7 @@ struct ContentView: View {
       // 这张图是本机排版出来的纯色文字，抖动只会把笔画糊成噪点，直接按最近色量化。
       // 写全类型名：可选参数上的 .none 会被当成 Optional.none。
       if editor.loadImage(data: data, preferredAlgorithm: DitherAlgorithm.none) {
+        recentEditorOrigin = nil
         recordsCurrentImage = false
         isEditing = true
       }
