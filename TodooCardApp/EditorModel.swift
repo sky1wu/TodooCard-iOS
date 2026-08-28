@@ -68,6 +68,36 @@ final class EditorModel: ObservableObject {
         return true
     }
 
+    /// 当前的构图与效果，存进最近发送记录后可以原样还原回来。
+    var configuration: AutomaticImageConfiguration {
+        AutomaticImageConfiguration(
+            rotation: rotation,
+            focusX: focusX,
+            focusY: focusY,
+            zoom: zoom,
+            algorithm: algorithm,
+            strength: strength,
+            brightnessCompensation: Float(brightnessCompensation)
+        )
+    }
+
+    /// 从最近发送记录回到编辑：换上原图副本，并把当时的构图与效果一起装回来。
+    func restore(source: UIImage, configuration: AutomaticImageConfiguration) {
+        processingTask?.cancel()
+        sourceImage = ImageProcessor.normalized(source)
+        previewImage = nil
+        payload = nil
+        payloadSHA256 = "—"
+        rotation = configuration.rotation
+        zoom = min(4, max(1, configuration.zoom))
+        focusX = min(100, max(0, configuration.focusX))
+        focusY = min(100, max(0, configuration.focusY))
+        algorithm = configuration.algorithm
+        brightnessCompensation = min(1, max(-1, Double(configuration.brightnessCompensation)))
+        errorMessage = nil
+        scheduleProcessing()
+    }
+
     func clearImage() {
         processingTask?.cancel()
         processingTask = nil

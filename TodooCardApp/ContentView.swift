@@ -18,6 +18,9 @@ private enum DevicePickerPurpose {
 private struct OutgoingSend {
   let payload: Data
   let preview: UIImage?
+  /// 记进最近发送时要一并存下的原图与构图，来自记录本身的重发则不需要。
+  let source: UIImage?
+  let configuration: AutomaticImageConfiguration
   /// 来自最近发送记录时只把那条记录移到最前，不再多存一份同样的画面。
   let recentID: UUID?
 }
@@ -206,6 +209,7 @@ struct ContentView: View {
             library: recents,
             bluetooth: bluetooth,
             sendingID: outgoing?.recentID,
+            open: openInEditor,
             resend: resend,
             delete: recents.remove
           )
@@ -311,8 +315,26 @@ struct ContentView: View {
   }
 
   private func primaryAction() {
-    guard let payload = editor.payload else { return }
-    beginSend(payload: payload, preview: editor.previewImage, recentID: nil)
+    guard let payload = editor.payload, let source = editor.sourceImage else { return }
+    beginSend(
+      payload: payload,
+      preview: editor.previewImage,
+      source: source,
+      configuration: editor.configuration,
+      recentID: nil
+    )
+  }
+
+  /// 轻点最近发送：把原图和当时的构图装回编辑器，确认或继续调整后再发送。
+  private func openInEditor(_ item: RecentSendItem) {
+    guard !bluetooth.isBusy else { return }
+    guard let draft = RecentSendStore.draft(for: item.id) else {
+      editor.errorMessage = "这条记录没有保留原图，长按可以直接重新发送同一张画面。"
+      return
+    }
+    editor.restore(source: draft.source, configuration: draft.configuration)
+    isEditing = true
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 
   /// 直接把当初发出的 payload 再发一次，画面与那次发送完全一致，也不必回到编辑器。
@@ -326,12 +348,26 @@ struct ContentView: View {
     beginSend(
       payload: payload,
       preview: RecentSendStore.preview(for: item.id),
+      source: nil,
+      configuration: .standard,
       recentID: item.id
     )
   }
 
-  private func beginSend(payload: Data, preview: UIImage?, recentID: UUID?) {
-    outgoing = OutgoingSend(payload: payload, preview: preview, recentID: recentID)
+  private func beginSend(
+    payload: Data,
+    preview: UIImage?,
+    source: UIImage?,
+    configuration: AutomaticImageConfiguration,
+    recentID: UUID?
+  ) {
+    outgoing = OutgoingSend(
+      payload: payload,
+      preview: preview,
+      source: source,
+      configuration: configuration,
+      recentID: recentID
+    )
     if bluetooth.sendToCurrentDevice(payload) { return }
     presentDevicePicker(for: .connectAndSend)
   }
@@ -347,8 +383,13 @@ struct ContentView: View {
     if let preview = sent.preview { DeviceScreenSnapshot.save(preview) }
     if let recentID = sent.recentID {
       recents.touch(recentID)
-    } else if let preview = sent.preview {
-      recents.record(preview: preview, payload: sent.payload)
+    } else if let preview = sent.preview, let source = sent.source {
+      recents.record(
+        source: source,
+        configuration: sent.configuration,
+        preview: preview,
+        payload: sent.payload
+      )
     }
   }
 
@@ -937,7 +978,8 @@ private struct ResumeEditingCard: View {
 
     ZStack {
       AppTheme.paper
-      if let image = editor.previewImage ?? editor.sourceImage {
+      // 小图上的六色画面只剩噪点，这里直接用原图。
+      if let image = editor.sourceImage ?? editor.previewImage {
         Image(uiImage: image)
           .resizable()
           .interpolation(.medium)
@@ -960,11 +1002,12 @@ private struct ResumeEditingCard: View {
   }
 }
 
-/// 最近成功发送过的画面，轻点即可原样再发一次。
+/// 最近成功发送过的画面：轻点回到编辑，长按可以原样再发一次。
 private struct RecentSendsSection: View {
   @ObservedObject var library: RecentSendLibrary
   @ObservedObject var bluetooth: TodooBluetoothManager
   let sendingID: UUID?
+  let open: (RecentSendItem) -> Void
   let resend: (RecentSendItem) -> Void
   let delete: (UUID) -> Void
 
@@ -986,6 +1029,7 @@ private struct RecentSendsSection: View {
               item: item,
               isSending: item.id == sendingID && bluetooth.isBusy,
               progress: bluetooth.progress,
+              open: { open(item) },
               resend: { resend(item) },
               delete: { delete(item.id) }
             )
@@ -995,7 +1039,7 @@ private struct RecentSendsSection: View {
       }
       .disabled(bluetooth.isBusy)
 
-      Text("轻点重新发送这张画面，长按可删除记录。")
+      Text("轻点回到编辑，长按可以原样重新发送或删除记录。")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
@@ -1008,15 +1052,22 @@ private struct RecentSendTile: View {
   let item: RecentSendItem
   let isSending: Bool
   let progress: Double
+  let open: () -> Void
   let resend: () -> Void
   let delete: () -> Void
 
   private static let width: CGFloat = 84
 
+  private var accessibilityHint: String {
+    if isSending { return "正在重新发送" }
+    if item.isEditable { return "轻点回到编辑，长按可原样重新发送" }
+    return "这条记录没有保留原图，长按可原样重新发送"
+  }
+
   var body: some View {
     let height = Self.width / CGFloat(CardDisplay.aspectRatio)
 
-    Button(action: resend) {
+    Button(action: open) {
       VStack(spacing: 6) {
         ZStack {
           Image(uiImage: item.thumbnail)
@@ -1059,7 +1110,7 @@ private struct RecentSendTile: View {
     .accessibilityLabel(
       "\(item.sentAt.formatted(date: .abbreviated, time: .shortened)) 发送的画面"
     )
-    .accessibilityHint(isSending ? "正在重新发送" : "轻点重新发送到卡片")
+    .accessibilityHint(accessibilityHint)
   }
 }
 

@@ -70,6 +70,23 @@ enum ImageProcessor {
         )
     }
 
+    /// 按同一套构图渲染一张没有抖动的彩色缩略图。六色画面缩到几十点只剩彩色噪点，
+    /// 列表里的小图用原图渲染才看得出发的是哪一张。
+    static func framedThumbnail(_ request: ImageProcessingRequest, width: CGFloat) throws -> UIImage {
+        let rendered = try renderCover(request)
+        let size = CGSize(
+            width: width,
+            height: (width * CGFloat(CardDisplay.height) / CGFloat(CardDisplay.width)).rounded()
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            context.cgContext.interpolationQuality = .high
+            rendered.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
     static func normalized(_ image: UIImage) -> UIImage {
         guard image.imageOrientation != .up || image.scale != 1 else { return image }
         let format = UIGraphicsImageRendererFormat()
