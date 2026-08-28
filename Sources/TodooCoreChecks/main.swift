@@ -177,6 +177,15 @@ func runChecks() throws {
     }
     try check(block.packet == Data([1, 0, 0, 0, 4, 5, 6, 7]), "data block prefix")
     try check(block.percent == 80 && !block.isLast, "data block progress")
+    guard let finalBlock = try makeDataBlock(payload: payload, index: 2, blockPayloadSize: 4) else {
+        throw CheckFailure.failed("final data block creation")
+    }
+    try check(
+        finalBlock.packet == Data([2, 0, 0, 0, 8, 9])
+            && finalBlock.written == 10
+            && finalBlock.isLast,
+        "final block probe packet"
+    )
     let missingBlock = try makeDataBlock(payload: payload, index: 3, blockPayloadSize: 4)
     try check(missingBlock == nil, "out-of-range block")
 

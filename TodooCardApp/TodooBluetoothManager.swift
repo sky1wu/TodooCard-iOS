@@ -83,6 +83,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         case verifiedBlock
         case verifiedWindowBoundary
         case checkpointProbe
+        case finalBlockProbe
     }
 
     private var central: CBCentralManager!
@@ -134,6 +135,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var repairRequestCount = 0
     private var completePayloadWritten = false
     private var finalTransferAckReceived = false
+    private var finalBlockProbeSent = false
     private var verifiedWindowSending = false
     private var dataResponsePurpose: DataResponsePurpose?
     private var earlyVerifiedRequestedBlock: Int?
@@ -657,6 +659,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         repairRequestCount = 0
         completePayloadWritten = false
         finalTransferAckReceived = false
+        finalBlockProbeSent = false
         verifiedWindowSending = false
         dataResponsePurpose = nil
         earlyVerifiedRequestedBlock = nil
@@ -1151,7 +1154,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             phase = .waitingFinal
             statusText = "等待卡片刷新…"
             appendLog("Payload 队列已完成；等待必需的最终 05 08 ACK。")
-            armVerifiedFinalDeadline()
+            if finalBlockProbeSent {
+                armVerifiedFinalDeadline(seconds: 5)
+            } else {
+                armVerifiedFinalProbeDeadline()
+            }
         } else {
             appendLog("窗口已排入到块 \(verifiedWindowEnd)；等待设备耐久 Flash 检查点。")
             armVerifiedCheckpointDeadline()
@@ -1215,22 +1222,70 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         }
     }
 
-    private func armVerifiedFinalDeadline() {
+    private func armVerifiedFinalDeadline(seconds: UInt64 = 10) {
         deadlineTask?.cancel()
         let identifier = transferID
         deadlineTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             guard !Task.isCancelled, let self,
                   self.transferID == identifier, self.isSending else { return }
             self.failTransfer("等待卡片最终 05 08 刷新确认超时。")
         }
     }
 
+    /// 最终窗口没有独立的累计 ACK；如果最后一个数据块在 ATT 已确认后仍未进入
+    /// 固件处理层，设备就不会生成 05 08。先等待 5 秒，再仅重发最后块一次，
+    /// 既能恢复这种收尾丢块，也不会退回整窗盲重放。
+    private func armVerifiedFinalProbeDeadline() {
+        deadlineTask?.cancel()
+        let identifier = transferID
+        deadlineTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self,
+                  self.transferID == identifier,
+                  self.isSending,
+                  self.phase == .waitingFinal,
+                  !self.finalBlockProbeSent else { return }
+            self.sendFinalBlockProbe()
+        }
+    }
+
+    private func sendFinalBlockProbe() {
+        let probeIndex = totalBlocks - 1
+        guard probeIndex >= 0,
+              let payload = transferPayload,
+              let peripheral = activePeripheral,
+              let characteristic = dataCharacteristic,
+              let block = try? makeDataBlock(
+                payload: payload,
+                index: UInt32(probeIndex),
+                blockPayloadSize: blockPayloadSize
+              ) else {
+            failTransfer("无法构造最终块探针。")
+            return
+        }
+        let supportsResponse = characteristic.properties.contains(.write)
+        let supportsNoResponse = characteristic.properties.contains(.writeWithoutResponse)
+        guard supportsResponse || supportsNoResponse else {
+            failTransfer("数据特征不支持最终块探针写入。")
+            return
+        }
+
+        finalBlockProbeSent = true
+        recordVerifiedWrite(block, index: probeIndex)
+        let type: CBCharacteristicWriteType = supportsResponse ? .withResponse : .withoutResponse
+        appendLog("最终 05 08 等待 5 秒未到；仅重发最后块 \(probeIndex) 查询设备进度。")
+        if type == .withResponse { dataResponsePurpose = .finalBlockProbe }
+        peripheral.writeValue(block.packet, for: characteristic, type: type)
+        if type == .withoutResponse { armVerifiedFinalDeadline(seconds: 5) }
+    }
+
     private func handleDataWriteResponse(error: Error?) {
         guard let purpose = dataResponsePurpose else { return }
         dataResponsePurpose = nil
         if let error {
-            failTransfer("数据窗口边界写入失败：\(error.localizedDescription)")
+            let operation = purpose == .finalBlockProbe ? "最终块探针" : "数据窗口"
+            failTransfer("\(operation)写入失败：\(error.localizedDescription)")
             return
         }
         lastGATTActivityAt = Date()
@@ -1241,6 +1296,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             appendLog("数据窗口边界 ATT 写入已确认。")
         case .checkpointProbe:
             appendLog("检查点探测块 ATT 写入已确认。")
+        case .finalBlockProbe:
+            appendLog("最终块探针 ATT 写入已确认。")
         }
         if let early = earlyVerifiedRequestedBlock {
             earlyVerifiedRequestedBlock = nil
@@ -1255,6 +1312,12 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             finishQueuedVerifiedWindow()
         case .checkpointProbe:
             armVerifiedCheckpointDeadline()
+        case .finalBlockProbe:
+            if finalTransferAckReceived, completePayloadWritten {
+                completeTransfer(finalAck: "05 08 00 00 00 00")
+            } else {
+                armVerifiedFinalDeadline(seconds: 5)
+            }
         }
     }
 
