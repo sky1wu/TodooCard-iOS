@@ -549,8 +549,7 @@ private struct DeviceCard3D: View {
       CardExtrusion(
         size: size,
         cornerRadius: cornerRadius,
-        depthOffset: depthOffset,
-        normal: normal
+        depthOffset: depthOffset
       )
 
       frontFace(cornerRadius: cornerRadius, normal: normal)
@@ -630,29 +629,45 @@ private struct DeviceCard3D: View {
 }
 
 /// 把圆角卡片沿厚度方向堆叠若干层，得到没有缝隙、圆角也正确的侧边。
+/// 侧面是直角切边而不是磨圆的边，所以整面用同一个色调：平面在定向光下本来就没有渐变，
+/// 与正面之间的明暗突变就是那道 90° 棱线。
 private struct CardExtrusion: View {
   let size: CGSize
   let cornerRadius: CGFloat
   let depthOffset: CGSize
-  let normal: CGSize
 
   private let layerCount = 12
+  /// 指向光源的方向，与正面高光同源：左上方，y 轴向下。
+  private let lightDirection = CGSize(width: -0.6, height: -0.8)
 
   var body: some View {
-    let lightBoost = -Double(normal.width) * 0.06 - Double(normal.height) * 0.06
+    let wallLevel = 0.58 + illumination * 0.14
 
     ZStack {
       ForEach(0..<layerCount, id: \.self) { index in
         // index 0 是最深的一层，先绘制，随后逐层压在它上面。
         let depth = CGFloat(layerCount - index) / CGFloat(layerCount)
+        // 只有贴着背面的那一层压暗，充当侧壁与背面之间的接触阴影。
+        let level = depth > 0.92 ? wallLevel - 0.12 : wallLevel
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .fill(AppTheme.deviceEdgeTone(0.80 - Double(depth) * 0.34 + lightBoost))
+          .fill(AppTheme.deviceEdgeTone(level))
           .frame(width: size.width, height: size.height)
           .offset(x: depthOffset.width * depth, y: depthOffset.height * depth)
       }
     }
     .frame(width: size.width, height: size.height)
     .allowsHitTesting(false)
+  }
+
+  /// 露出来的是哪一侧的壁面由厚度位移决定，壁面法线朝向光源时更亮。
+  private var illumination: Double {
+    let length = sqrt(
+      Double(depthOffset.width * depthOffset.width + depthOffset.height * depthOffset.height)
+    )
+    guard length > 0.0001 else { return 0 }
+    let normalX = Double(depthOffset.width) / length
+    let normalY = Double(depthOffset.height) / length
+    return normalX * Double(lightDirection.width) + normalY * Double(lightDirection.height)
   }
 }
 
