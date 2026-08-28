@@ -14,6 +14,25 @@ struct DiscoveredCard: Identifiable, Equatable {
     let rawAdvertisement: String
 }
 
+/// App Group 的标识与共享存储。主 App、分享扩展和画面快照都要读它，
+/// 所以不挂在 @MainActor 上，任何线程都能直接取。
+enum TodooAppGroup {
+    static let identifier: String = {
+        guard let configured = Bundle.main.object(
+            forInfoDictionaryKey: "TodooAppGroupIdentifier"
+        ) as? String, !configured.isEmpty, !configured.contains("$(") else {
+            return "group.com.todoocard.sender"
+        }
+        return configured
+    }()
+
+    static let preferences = UserDefaults(suiteName: identifier) ?? .standard
+
+    static var container: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
+    }
+}
+
 @MainActor
 final class TodooBluetoothManager: NSObject, ObservableObject {
     static let shared = TodooBluetoothManager()
@@ -115,16 +134,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private static let deviceAliasesKey = "TodooCard.deviceAliases"
     private static let centralRestoreIdentifier = "com.todoocard.sender.central"
     private static var automaticTransferOwner: ObjectIdentifier?
-    private static let fallbackAppGroupIdentifier = "group.com.todoocard.sender"
-    private static let appGroupIdentifier: String = {
-        guard let configured = Bundle.main.object(
-            forInfoDictionaryKey: "TodooAppGroupIdentifier"
-        ) as? String, !configured.isEmpty, !configured.contains("$(") else {
-            return fallbackAppGroupIdentifier
-        }
-        return configured
-    }()
-    private static let preferences = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
+    private static let preferences = TodooAppGroup.preferences
     private static let isAppExtension = Bundle.main.bundleURL.pathExtension == "appex"
     private static let sharedPreferenceKeys = [
         preferredDeviceIdentifierKey,

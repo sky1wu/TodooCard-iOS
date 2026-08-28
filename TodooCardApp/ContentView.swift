@@ -110,6 +110,7 @@ struct ContentView: View {
     }
     .onChange(of: bluetooth.statusText) { status in
       guard status.hasPrefix("发送成功") else { return }
+      if let preview = editor.previewImage { DeviceScreenSnapshot.save(preview) }
       UINotificationFeedbackGenerator().notificationOccurred(.success)
       UIAccessibility.post(notification: .announcement, argument: "图片已成功发送到卡片")
     }
@@ -370,6 +371,7 @@ private struct HomeDeviceShowcase: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.scenePhase) private var scenePhase
   @StateObject private var tilt = DeviceTiltMotion()
+  @State private var screenImage: UIImage?
 
   /// 静止时也保留一点角度，让厚度与光影始终可见。
   private static let restingPitch = 5.5
@@ -414,7 +416,8 @@ private struct HomeDeviceShowcase: View {
           size: CGSize(width: cardWidth, height: cardHeight),
           pitch: pitch,
           yaw: yaw,
-          isDeviceKnown: bluetooth.hasCurrentDevice
+          isDeviceKnown: bluetooth.hasCurrentDevice,
+          screenImage: screenImage
         )
 
         VStack {
@@ -427,9 +430,16 @@ private struct HomeDeviceShowcase: View {
         .padding(14)
       }
     }
-    .onAppear { syncMotion(isForeground: scenePhase == .active) }
+    .onAppear {
+      screenImage = DeviceScreenSnapshot.load()
+      syncMotion(isForeground: scenePhase == .active)
+    }
     .onDisappear { tilt.stop() }
-    .onChange(of: scenePhase) { phase in syncMotion(isForeground: phase == .active) }
+    .onChange(of: scenePhase) { phase in
+      // 从分享扩展或快捷指令发完图回到 App 时，卡片上的画面可能已经换了。
+      if phase == .active { screenImage = DeviceScreenSnapshot.load() }
+      syncMotion(isForeground: phase == .active)
+    }
     .onChange(of: reduceMotion) { _ in syncMotion(isForeground: scenePhase == .active) }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
@@ -520,6 +530,7 @@ private struct DeviceCard3D: View {
   let pitch: Double
   let yaw: Double
   let isDeviceKnown: Bool
+  let screenImage: UIImage?
 
   /// 3 mm 的真实厚度在这个尺寸下只有 1 pt 左右，略作夸张才能看出体积。
   private let depthExaggeration: CGFloat = 1.9
@@ -589,11 +600,19 @@ private struct DeviceCard3D: View {
       DeviceMatteTexture(cornerRadius: cornerRadius)
 
       ZStack {
-        ScreenArtwork()
-          .opacity(isDeviceKnown ? 1 : 0.35)
-        if !isDeviceKnown {
-          AppTheme.paper.opacity(0.55)
+        AppTheme.paper
+
+        if let screenImage {
+          Image(uiImage: screenImage)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+        } else {
+          // 还没发送过图片时用示意画面，没有设备记录时再压暗一档。
+          ScreenArtwork()
+            .opacity(isDeviceKnown ? 1 : 0.3)
         }
+
         ScreenGlare(cornerRadius: screenCornerRadius, normal: normal)
       }
       .frame(width: screenWidth, height: screenHeight)

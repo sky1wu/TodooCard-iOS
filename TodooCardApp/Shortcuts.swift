@@ -90,12 +90,13 @@ struct UpdateTodooCardIntent: AppIntent {
       strength: Float(strengthPercent) / 100,
       brightnessCompensation: Float(brightnessPercent) / 100
     )
-    let payload = try await Task.detached(priority: .userInitiated) {
-      try AutomaticImageProcessor.makePayload(from: imageData, configuration: configuration)
+    let processed = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.process(imageData, configuration: configuration)
     }.value
 
     let bluetooth = await TodooBluetoothManager.shared
-    try await bluetooth.sendAutomaticallyAndWait(payload)
+    try await bluetooth.sendAutomaticallyAndWait(processed.payload)
+    DeviceScreenSnapshot.save(processed.preview)
     return .result()
   }
 }
@@ -147,15 +148,16 @@ struct SendBingDailyWallpaperIntent: AppIntent {
       strength: Float(strengthPercent) / 100,
       brightnessCompensation: Float(brightnessPercent) / 100
     )
-    let payload = try await Task.detached(priority: .userInitiated) {
-      try AutomaticImageProcessor.makePayload(
-        from: wallpaper.data,
+    let processed = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.process(
+        wallpaper.data,
         configuration: configuration
       )
     }.value
 
     let bluetooth = await TodooBluetoothManager.shared
-    try await bluetooth.sendAutomaticallyAndWait(payload)
+    try await bluetooth.sendAutomaticallyAndWait(processed.payload)
+    DeviceScreenSnapshot.save(processed.preview)
     return .result()
   }
 }

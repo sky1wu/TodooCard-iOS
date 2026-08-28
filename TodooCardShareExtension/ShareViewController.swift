@@ -80,9 +80,9 @@ final class ShareViewController: UIViewController {
                 try Task.checkCancellation()
                 self.statusLabel.text = "正在生成六色卡片内容…"
 
-                let payload = try await Task.detached(priority: .userInitiated) {
-                    try AutomaticImageProcessor.makePayload(
-                        from: imageData,
+                let processed = try await Task.detached(priority: .userInitiated) {
+                    try AutomaticImageProcessor.process(
+                        imageData,
                         configuration: .standard
                     )
                 }.value
@@ -91,7 +91,8 @@ final class ShareViewController: UIViewController {
                 let bluetooth = TodooBluetoothManager.shared
                 self.observe(bluetooth)
                 self.statusLabel.text = "正在连接上次使用的设备…"
-                try await bluetooth.sendAutomaticallyAndWait(payload)
+                try await bluetooth.sendAutomaticallyAndWait(processed.payload)
+                DeviceScreenSnapshot.save(processed.preview)
                 self.finishSuccessfully()
             } catch is CancellationError {
                 return

@@ -25,10 +25,10 @@ enum AutomaticImageProcessor {
     static let maximumImageBytes = 100_000_000
     static let maximumImagePixels = 50_000_000
 
-    static func makePayload(
-        from data: Data,
+    static func process(
+        _ data: Data,
         configuration: AutomaticImageConfiguration
-    ) throws -> Data {
+    ) throws -> ImageProcessingResult {
         guard !data.isEmpty else { throw AutomaticUpdateError.emptyImage }
         guard data.count <= maximumImageBytes else { throw AutomaticUpdateError.imageTooLarge }
         guard let decoded = UIImage(data: data) else { throw AutomaticUpdateError.invalidImage }
@@ -50,7 +50,7 @@ enum AutomaticImageProcessor {
             strength: configuration.strength,
             brightnessCompensation: configuration.brightnessCompensation
         )
-        return try ImageProcessor.process(request).payload
+        return try ImageProcessor.process(request)
     }
 }
 
