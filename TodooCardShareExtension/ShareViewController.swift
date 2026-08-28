@@ -93,7 +93,7 @@ final class ShareViewController: UIViewController {
                 self.statusLabel.text = "正在连接上次使用的设备…"
                 try await bluetooth.sendAutomaticallyAndWait(processed.payload)
                 DeviceScreenSnapshot.save(processed.preview)
-                RecentSendStore.record(
+                RecentSendStore.recordUserSelected(
                     sourceData: imageData,
                     configuration: .standard,
                     preview: processed.preview,

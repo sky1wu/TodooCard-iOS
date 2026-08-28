@@ -40,11 +40,12 @@ func runChecks() throws {
     )
     try check(abs(CardDisplay.aspectRatio - 2.0 / 3.0) < 0.000_001, "display aspect ratio")
 
-    let advertisement = try parseTodooAdvertisement(Data([0x53, 0x50, 0x4C, 0x03, 0x8C, 0x00, 0x13]))
+    let advertisement = try parseTodooAdvertisement(Data([0x53, 0x50, 0x4C, 0x13, 0x8C, 0x00, 0x13]))
     try check(advertisement.manufacturerID == 0x5053, "manufacturer parser")
     try check(advertisement.screenType == 0x134C, "screen type parser")
     try check(advertisement.isCompatible && advertisement.requiresEncryptedGATT, "security flags")
     try check(advertisement.pairingWindowOpen, "pairing window flag")
+    try check(advertisement.turboLink, "turbo link flag")
 
     let layout = try computeCoverLayout(
         sourceWidth: 1_200,
@@ -97,12 +98,78 @@ func runChecks() throws {
         "reference payload SHA-256"
     )
 
+    let level3Raw = (0 ..< CardDisplay.rawByteCount).map {
+        UInt8(truncatingIfNeeded: $0 * 17 + ($0 / 97) * 29)
+    }
+    let level3Payload = try T3PayloadBuilder.quickLZLevel3(level3Raw)
+    let level3Info = try T3PayloadBuilder.inspectQuickLZ(level3Payload)
+    try check(level3Info.decodedBytes == CardDisplay.rawByteCount, "level-3 decoded byte count")
+    try check(level3Info.blocks == 103 && level3Info.levels == [3], "level-3 block layout")
+    try check(level3Payload.count == 44_304, "level-3 deterministic size")
+    let unwrappedLevel3 = try T3PayloadBuilder.unwrapQuickLZ(level3Payload)
+    try check(unwrappedLevel3 == Data(level3Raw), "level-3 round trip")
+    let level3Digest = SHA256.hash(data: level3Payload).map { String(format: "%02x", $0) }.joined()
+    try check(
+        level3Digest == "31761fbb26551a0c498ca37522c6aa490e7ca558b47fb4d56af777af9de793cc",
+        "level-3 reference SHA-256"
+    )
+
+    let payloadSet = T3PayloadSet(
+        currentCompressed: Data(repeating: 1, count: 901),
+        legacyCompressed: Data(repeating: 2, count: 2_001),
+        controllerRaw: Data(repeating: 3, count: 1_200)
+    )
+    let currentSelection = try T3PayloadBuilder.selectTransferPayload(
+        payloadSet,
+        firmwareVersion: 0xA6,
+        blockPayloadSize: 240
+    )
+    try check(
+        currentSelection.kind == .currentCompressed
+            && currentSelection.data.count == 960
+            && currentSelection.paddingBytes == 59
+            && currentSelection.usesVerifiedWindows,
+        "current firmware payload selection"
+    )
+    let legacySelection = try T3PayloadBuilder.selectTransferPayload(
+        payloadSet,
+        firmwareVersion: 0x95,
+        blockPayloadSize: 240
+    )
+    try check(
+        legacySelection.kind == .legacyCompressed && !legacySelection.usesVerifiedWindows,
+        "legacy firmware payload selection"
+    )
+    let migratedSelection = try T3PayloadBuilder.selectTransferPayload(
+        .legacyOnly(Data(repeating: 4, count: 2_001)),
+        firmwareVersion: 0xA6,
+        blockPayloadSize: 240
+    )
+    try check(
+        migratedSelection.kind == .legacyCompressed
+            && migratedSelection.data.count == 2_160
+            && migratedSelection.paddingBytes == 159
+            && migratedSelection.usesVerifiedWindows,
+        "migrated history payload padding"
+    )
+
     let lengthRequest = try encodePayloadLengthRequest(0x01020304)
     try check(lengthRequest == Data([2, 4, 3, 2, 1, 1]), "payload length request")
     let blockSize = try parseControlMessage(Data([1, 184, 0]))
     try check(blockSize.blockPayloadSize == 180 && blockSize.status == 0, "block size reply")
     let ack = try parseControlMessage(Data([5, 0, 0x78, 0x56, 0x34, 0x12]))
     try check(ack.index == 0x12345678, "little-endian ACK index")
+    let diagnostics = parseImageAckDiagnostics(Data([
+        0x27, 0x01, 0x03, 0x0D, 2, 0, 4, 0, 3, 0, 1, 0,
+        0xE0, 0x02, 0, 0, 1, 7, 0xDF, 0x02,
+    ]))
+    try check(
+        diagnostics?.session == 3
+            && diagnostics?.requestedBlock == 736
+            && diagnostics?.lastReceivedBlock == 735
+            && diagnostics?.blockReceived == true,
+        "image ACK diagnostics parser"
+    )
 
     let payload = Data((0 ..< 10).map(UInt8.init))
     guard let block = try makeDataBlock(payload: payload, index: 1, blockPayloadSize: 4) else {

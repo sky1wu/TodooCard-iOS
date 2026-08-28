@@ -17,7 +17,7 @@ struct ImageProcessingRequest: @unchecked Sendable {
 
 struct ImageProcessingResult: @unchecked Sendable {
     let preview: UIImage
-    let payload: Data
+    let payload: T3PayloadSet
     let payloadSHA256: String
     let validation: PayloadValidation
 }
@@ -59,14 +59,17 @@ enum ImageProcessor {
             strength: request.strength,
             brightness: request.brightnessCompensation
         )
-        let built = try T3PayloadBuilder.build(from: codes)
+        let payloads = try T3PayloadBuilder.buildPayloadSet(from: codes)
+        let validation = try T3PayloadBuilder.validate(payloads.legacyCompressed)
         let preview = try previewImage(from: codes)
-        let digest = SHA256.hash(data: built.data).map { String(format: "%02x", $0) }.joined()
+        let digest = SHA256.hash(data: payloads.representativeData)
+            .map { String(format: "%02x", $0) }
+            .joined()
         return ImageProcessingResult(
             preview: preview,
-            payload: built.data,
+            payload: payloads,
             payloadSHA256: digest,
-            validation: built.validation
+            validation: validation
         )
     }
 

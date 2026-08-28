@@ -97,12 +97,6 @@ struct UpdateTodooCardIntent: AppIntent {
     let bluetooth = await TodooBluetoothManager.shared
     try await bluetooth.sendAutomaticallyAndWait(processed.payload)
     DeviceScreenSnapshot.save(processed.preview)
-    RecentSendStore.record(
-      sourceData: imageData,
-      configuration: configuration,
-      preview: processed.preview,
-      payload: processed.payload
-    )
     return .result()
   }
 }
@@ -164,12 +158,6 @@ struct SendBingDailyWallpaperIntent: AppIntent {
     let bluetooth = await TodooBluetoothManager.shared
     try await bluetooth.sendAutomaticallyAndWait(processed.payload)
     DeviceScreenSnapshot.save(processed.preview)
-    RecentSendStore.record(
-      sourceData: wallpaper.data,
-      configuration: configuration,
-      preview: processed.preview,
-      payload: processed.payload
-    )
     return .result()
   }
 }
@@ -223,12 +211,6 @@ struct SendHealthSummaryIntent: AppIntent {
     let bluetooth = await TodooBluetoothManager.shared
     try await bluetooth.sendAutomaticallyAndWait(processed.payload)
     DeviceScreenSnapshot.save(processed.preview)
-    RecentSendStore.record(
-      sourceData: cardData,
-      configuration: configuration,
-      preview: processed.preview,
-      payload: processed.payload
-    )
     return .result()
   }
 }
@@ -304,12 +286,6 @@ struct SendHealthSummaryFromShortcutIntent: AppIntent {
     let bluetooth = await TodooBluetoothManager.shared
     try await bluetooth.sendAutomaticallyAndWait(processed.payload)
     DeviceScreenSnapshot.save(processed.preview)
-    RecentSendStore.record(
-      sourceData: cardData,
-      configuration: configuration,
-      preview: processed.preview,
-      payload: processed.payload
-    )
     return .result()
   }
 

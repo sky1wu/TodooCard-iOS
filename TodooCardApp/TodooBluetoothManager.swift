@@ -52,6 +52,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     var isBusy: Bool { isPreparingTransfer || isSending }
     var hasCurrentDevice: Bool { currentDeviceIdentifier != nil }
+    var connectedFirmwareVersion: UInt8? { activeFirmwareVersion }
     var currentDeviceIdentifier: UUID? {
         activePeripheral?.identifier ?? persistedCurrentDeviceIdentifier
     }
@@ -78,6 +79,12 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         let timeoutMessage: String
     }
 
+    private enum DataResponsePurpose {
+        case verifiedBlock
+        case verifiedWindowBoundary
+        case checkpointProbe
+    }
+
     private var central: CBCentralManager!
     private var peripherals: [UUID: CBPeripheral] = [:]
     private var advertisements: [UUID: TodooAdvertisement] = [:]
@@ -85,9 +92,15 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var controlCharacteristic: CBCharacteristic?
     private var dataCharacteristic: CBCharacteristic?
     private var batteryCharacteristic: CBCharacteristic?
+    private var diagnosticsCharacteristic: CBCharacteristic?
     private var selectedProfile: TransferProfile?
-    private var pendingPayload: Data?
-    private var automaticSendPayload: Data?
+    private var pendingPayload: T3PayloadSet?
+    private var automaticSendPayload: T3PayloadSet?
+    private var transferPayload: Data?
+    private var usesVerifiedWindows = false
+    private var activeFirmwareVersion: UInt8?
+    private var activeCapabilityFlags: UInt8?
+    private var activeProtocolMetadataVerified = false
     private var isFindingCurrentDevice = false
     private var pendingControlWrite: PendingControlWrite?
     private var phase = Phase.idle
@@ -115,6 +128,16 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var checkpointTimeouts = 0
     private var dataWrites = 0
     private var retransmittedBlocks = 0
+    private var verifiedWindowStart = 0
+    private var verifiedWindowEnd = 0
+    private var lastSentBlockIndex = -1
+    private var repairRequestCount = 0
+    private var completePayloadWritten = false
+    private var finalTransferAckReceived = false
+    private var verifiedWindowSending = false
+    private var dataResponsePurpose: DataResponsePurpose?
+    private var earlyVerifiedRequestedBlock: Int?
+    private var pendingTransferFailure: String?
 
     private var scanTask: Task<Void, Never>?
     private var windowTask: Task<Void, Never>?
@@ -124,6 +147,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private var handshakeTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var automaticTransferTimeoutTask: Task<Void, Never>?
+    private var diagnosticReadTask: Task<Void, Never>?
     private var automaticTransferContinuation: CheckedContinuation<Void, Error>?
     private var transferID = UUID()
 
@@ -132,6 +156,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     private static let currentDeviceIdentifierKey = "TodooCard.currentDeviceIdentifier"
     private static let currentDeviceNameKey = "TodooCard.currentDeviceName"
     private static let deviceAliasesKey = "TodooCard.deviceAliases"
+    private static let firmwareVersionsKey = "TodooCard.firmwareVersions"
+    private static let capabilityFlagsKey = "TodooCard.capabilityFlags"
     private static let centralRestoreIdentifier = "com.todoocard.sender.central"
     private static var automaticTransferOwner: ObjectIdentifier?
     private static let preferences = TodooAppGroup.preferences
@@ -142,6 +168,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         currentDeviceIdentifierKey,
         currentDeviceNameKey,
         deviceAliasesKey,
+        firmwareVersionsKey,
+        capabilityFlagsKey,
     ]
 
     private var preferredDeviceIdentifier: UUID? {
@@ -190,7 +218,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         startDiscovery()
     }
 
-    private func sendAutomatically(_ payload: Data) {
+    private func sendAutomatically(_ payload: T3PayloadSet) {
         errorMessage = nil
         guard !payload.isEmpty else {
             fail("不能发送空 Payload。")
@@ -229,7 +257,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         }
     }
 
-    func sendAutomaticallyAndWait(_ payload: Data) async throws {
+    func sendAutomaticallyAndWait(_ payload: T3PayloadSet) async throws {
         guard automaticTransferContinuation == nil, !isBusy,
               Self.automaticTransferOwner == nil else {
             throw AutomaticUpdateError.transferInProgress
@@ -257,6 +285,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         guard central.state == .poweredOn,
               let payload = automaticSendPayload,
               let identifier = preferredDeviceIdentifier else { return }
+        guard activeProtocolMetadataVerified || advertisements[identifier] != nil else {
+            appendLog("发送前先扫描并核验设备固件版本与能力位。")
+            startDiscovery()
+            return
+        }
         if let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first {
             automaticSendPayload = nil
             appendLog("从系统缓存恢复已记住的自动化设备，直接连接。")
@@ -315,7 +348,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isScanning = false
     }
 
-    func connectAndSend(deviceID: UUID, payload: Data) {
+    func connectAndSend(deviceID: UUID, payload: T3PayloadSet) {
         guard let peripheral = peripherals[deviceID], let advertisement = advertisements[deviceID] else {
             fail("选中的设备已离开扫描范围，请重新扫描。")
             return
@@ -324,6 +357,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             fail("设备广播显示 pairing=open。请先在系统蓝牙设置中完成绑定，等待配对窗口关闭后再试。")
             return
         }
+        guard !advertisement.otaRecoveryMode else {
+            fail("设备处于 OTA 恢复模式，当前固件拒绝图片传输。请先完成受支持的固件修复。")
+            return
+        }
+        applyProtocolMetadata(advertisement, for: deviceID)
         connectAndSend(peripheral: peripheral, payload: payload)
     }
 
@@ -336,14 +374,15 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             fail("设备广播显示 pairing=open。请先在系统蓝牙设置中完成绑定，等待配对窗口关闭后再试。")
             return
         }
+        applyProtocolMetadata(advertisement, for: deviceID)
         connect(peripheral: peripheral, payload: nil)
     }
 
-    private func connectAndSend(peripheral: CBPeripheral, payload: Data) {
+    private func connectAndSend(peripheral: CBPeripheral, payload: T3PayloadSet) {
         connect(peripheral: peripheral, payload: payload)
     }
 
-    private func connect(peripheral: CBPeripheral, payload: Data?) {
+    private func connect(peripheral: CBPeripheral, payload: T3PayloadSet?) {
         stopDiscovery()
         if let activePeripheral,
            activePeripheral.identifier != peripheral.identifier {
@@ -356,6 +395,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         }
 
         pendingPayload = payload
+        loadProtocolMetadataIfNeeded(for: peripheral.identifier)
+        if payload != nil, let flags = activeCapabilityFlags, flags & 0x08 != 0 {
+            fail("设备处于 OTA 恢复模式，当前固件拒绝图片传输。请先完成受支持的固件修复。")
+            return
+        }
         progress = 0
         errorMessage = nil
         isPreparingTransfer = payload != nil
@@ -396,13 +440,26 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     }
 
     @discardableResult
-    func sendToCurrentDevice(_ payload: Data) -> Bool {
+    func sendToCurrentDevice(_ payload: T3PayloadSet) -> Bool {
         guard let identifier = currentDeviceIdentifier else { return false }
         if isConnected,
            let activePeripheral,
            activePeripheral.identifier == identifier,
            activePeripheral.state == .connected {
             send(payload)
+            return true
+        }
+        if !activeProtocolMetadataVerified, advertisements[identifier] == nil {
+            guard central.state == .poweredOn else {
+                fail("请先在系统设置中打开蓝牙，并允许 TodooCard 使用蓝牙。")
+                return true
+            }
+            pendingPayload = payload
+            isPreparingTransfer = true
+            isFindingCurrentDevice = true
+            appendLog("发送前重新扫描当前设备，核验固件版本与能力位。")
+            startDiscovery()
+            statusText = "正在核验 \(connectedDeviceName ?? "当前设备")…"
             return true
         }
         if let activePeripheral, activePeripheral.identifier == identifier {
@@ -427,7 +484,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         return true
     }
 
-    func send(_ payload: Data) {
+    func send(_ payload: T3PayloadSet) {
         guard isConnected, activePeripheral?.state == .connected else {
             fail("设备连接已断开，请重新连接。")
             return
@@ -437,6 +494,17 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         isPreparingTransfer = true
         transferConnectionRecoveryAttempts = 0
         reconnectingForTransfer = false
+        guard activeProtocolMetadataVerified else {
+            isFindingCurrentDevice = true
+            statusText = "正在核验设备协议…"
+            appendLog("当前连接缺少本次广播协议元数据；断开后重新扫描再发送。")
+            if let activePeripheral {
+                central.cancelPeripheralConnection(activePeripheral)
+            } else {
+                startDiscovery()
+            }
+            return
+        }
         if let lastGATTActivityAt {
             let idleSeconds = Date().timeIntervalSince(lastGATTActivityAt)
             if idleSeconds >= reusableConnectionIdleLimit,
@@ -461,6 +529,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
         reconnectTask?.cancel()
+        diagnosticReadTask?.cancel()
         if let activePeripheral {
             central.cancelPeripheralConnection(activePeripheral)
         }
@@ -476,7 +545,9 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         controlCharacteristic = nil
         dataCharacteristic = nil
         batteryCharacteristic = nil
+        diagnosticsCharacteristic = nil
         selectedProfile = nil
+        transferPayload = nil
         batteryReadComplete = false
         transferCharacteristicsReady = false
         controlNotificationsReady = false
@@ -496,8 +567,12 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
         reconnectTask?.cancel()
+        diagnosticReadTask?.cancel()
         resetConnectionDiscovery()
         activePeripheral = nil
+        activeFirmwareVersion = nil
+        activeCapabilityFlags = nil
+        activeProtocolMetadataVerified = false
         isConnected = false
         isConnecting = false
         isPreparingTransfer = false
@@ -517,6 +592,23 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             return
         }
         isPreparingTransfer = true
+        guard activeProtocolMetadataVerified,
+              activeFirmwareVersion != nil,
+              let flags = activeCapabilityFlags else {
+            isFindingCurrentDevice = true
+            statusText = "正在核验设备协议…"
+            appendLog("缺少本次厂商广播中的固件版本或能力位；断开后重新扫描。")
+            if let activePeripheral, activePeripheral.state == .connected {
+                central.cancelPeripheralConnection(activePeripheral)
+            } else {
+                startDiscovery()
+            }
+            return
+        }
+        guard flags & 0x08 == 0 else {
+            fail("设备处于 OTA 恢复模式，当前固件拒绝图片传输。请先完成受支持的固件修复。")
+            return
+        }
         guard batteryReadComplete, transferCharacteristicsReady, controlNotificationsReady else {
             statusText = "正在验证安全连接…"
             return
@@ -549,6 +641,8 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         progress = 0
         phase = .waitingBlockSize
         blockPayloadSize = 0
+        transferPayload = nil
+        usesVerifiedWindows = false
         totalBlocks = 0
         nextBlockIndex = 0
         highestSentExclusive = 0
@@ -557,6 +651,16 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         checkpointTimeouts = 0
         dataWrites = 0
         retransmittedBlocks = 0
+        verifiedWindowStart = 0
+        verifiedWindowEnd = 0
+        lastSentBlockIndex = -1
+        repairRequestCount = 0
+        completePayloadWritten = false
+        finalTransferAckReceived = false
+        verifiedWindowSending = false
+        dataResponsePurpose = nil
+        earlyVerifiedRequestedBlock = nil
+        pendingTransferFailure = nil
         statusText = "正在协商数据块…"
         sendControl(
             Data([TransferCommand.requestBlockSize]),
@@ -665,6 +769,11 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
         if message.command == TransferCommand.dataAcknowledgement,
            message.status == TransferStatus.transferEnd {
+            if usesVerifiedWindows, !completePayloadWritten || dataResponsePurpose != nil {
+                finalTransferAckReceived = true
+                appendLog("最终 05 08 ACK 已提前到达；等待本地窗口边界写入完成。")
+                return
+            }
             completeTransfer(finalAck: data.hexString)
             return
         }
@@ -679,14 +788,48 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
                 return
             }
             guard let peripheral = activePeripheral else { return }
-            let maximum = peripheral.maximumWriteValueLength(for: .withoutResponse)
+            let maximumWriteType: CBCharacteristicWriteType = dataCharacteristic?.properties
+                .contains(.writeWithoutResponse) == true ? .withoutResponse : .withResponse
+            let maximum = peripheral.maximumWriteValueLength(for: maximumWriteType)
             guard payloadSize + 4 <= maximum else {
                 fail("设备要求的 \(payloadSize + 4) 字节数据块超过 iOS 链路上限 \(maximum) 字节。")
                 return
             }
             blockPayloadSize = payloadSize
-            guard let payload = pendingPayload,
-                  let request = try? encodePayloadLengthRequest(payload.count) else {
+            guard let payloads = pendingPayload else {
+                fail("待发送 Payload 已丢失。")
+                return
+            }
+            let selection: SelectedT3TransferPayload
+            do {
+                selection = try T3PayloadBuilder.selectTransferPayload(
+                    payloads,
+                    firmwareVersion: activeFirmwareVersion,
+                    blockPayloadSize: payloadSize,
+                    verifiedFirmwareMinimum: TodooBluetoothConstants.verifiedTransferMinimum
+                )
+            } catch {
+                fail("无法选择设备 Payload：\(error.localizedDescription)")
+                return
+            }
+            transferPayload = selection.data
+            usesVerifiedWindows = selection.usesVerifiedWindows
+            let profileLabel: String
+            switch selection.kind {
+            case .currentCompressed: profileLabel = "v157+ QuickLZ level-3"
+            case .legacyCompressed: profileLabel = "legacy QuickLZ stored"
+            case .controllerRaw: profileLabel = "RAW controller bitmap"
+            }
+            let firmwareLabel = activeFirmwareVersion.map { String(format: "0x%02X", $0) } ?? "未知"
+            appendLog(
+                "固件 \(firmwareLabel)；选择 \(profileLabel)，\(selection.data.count) 字节"
+                    + (selection.paddingBytes > 0 ? "（补齐 \(selection.paddingBytes) 字节）" : "")
+                    + (usesVerifiedWindows ? "，启用 32 块耐久检查点。" : "，使用旧版兼容传输。")
+            )
+            guard let request = try? encodePayloadLengthRequest(
+                selection.data.count,
+                compressed: selection.compressed
+            ) else {
                 fail("无法编码 Payload 长度。")
                 return
             }
@@ -710,7 +853,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         case .waitingStart where message.command == TransferCommand.dataAcknowledgement:
             finishControlExchange()
             guard message.status == TransferStatus.success, let index = message.index,
-                  let payload = pendingPayload else {
+                  let payload = transferPayload else {
                 fail("设备拒绝开始传输：\(data.hexString)")
                 return
             }
@@ -724,8 +867,13 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
             highestAcknowledgedIndex = Int(index)
             phase = .sendingData
             statusText = "正在发送图片…"
-            appendLog("从块 \(index)/\(max(0, totalBlocks - 1)) 开始，5 块窗口、32 块最大未确认量。")
-            pumpWindow()
+            if usesVerifiedWindows {
+                appendLog("从块 \(index)/\(max(0, totalBlocks - 1)) 开始，使用 32 块耐久检查点。")
+                beginVerifiedWindow(at: Int(index))
+            } else {
+                appendLog("从块 \(index)/\(max(0, totalBlocks - 1)) 开始，5 块窗口、32 块最大未确认量。")
+                pumpWindow()
+            }
 
         case .sendingData, .waitingFinal:
             guard message.command == TransferCommand.dataAcknowledgement else { return }
@@ -737,7 +885,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
     }
 
     private func pumpWindow() {
-        guard isSending, phase == .sendingData, let payload = pendingPayload,
+        guard isSending, phase == .sendingData, let payload = transferPayload,
               let peripheral = activePeripheral, let dataCharacteristic else { return }
         windowTask?.cancel()
         deadlineTask?.cancel()
@@ -802,10 +950,14 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
 
     private func handleDataAcknowledgement(_ message: ControlMessage) {
         guard message.status == TransferStatus.success, let rawIndex = message.index else {
-            fail("设备返回了无效的数据确认：\(message.bytes.hexString)")
+            failTransfer(transferErrorMessage(status: message.status, bytes: message.bytes))
             return
         }
         let index = Int(rawIndex)
+        if usesVerifiedWindows {
+            handleVerifiedAcknowledgement(index)
+            return
+        }
         guard index <= totalBlocks, index <= highestSentExclusive else {
             fail("设备确认索引 \(index) 超出已发送范围。")
             return
@@ -853,6 +1005,272 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         }
     }
 
+    private func beginVerifiedWindow(at index: Int) {
+        deadlineTask?.cancel()
+        windowTask?.cancel()
+        let total = totalBlocks
+        guard index >= 0, index <= total else {
+            failTransfer("设备返回的续传块 \(index) 无效；总块数为 \(total)。")
+            return
+        }
+        if index == total {
+            guard completePayloadWritten || lastSentBlockIndex >= total - 1 else {
+                failTransfer("设备在 Payload 尚未完整写入时跳到了块 \(index)。")
+                return
+            }
+            completePayloadWritten = true
+            phase = .waitingFinal
+            statusText = "等待卡片刷新…"
+            appendLog("设备耐久检查点已覆盖全部 \(total) 块；等待最终 05 08 ACK。")
+            armVerifiedFinalDeadline()
+            return
+        }
+
+        if lastSentBlockIndex >= 0 {
+            guard index <= verifiedWindowEnd else {
+                failTransfer("设备检查点从窗口末尾 \(verifiedWindowEnd) 跳到了块 \(index)。")
+                return
+            }
+            if index < verifiedWindowEnd {
+                repairRequestCount += 1
+                guard repairRequestCount <= 16 else {
+                    failTransfer("设备请求修复数据块超过 16 次；请把手机移近卡片后重试。")
+                    return
+                }
+                appendLog("设备只持久化到块 \(index)；修复未完成窗口（\(repairRequestCount)/16）。")
+            } else {
+                repairRequestCount = 0
+                appendLog("耐久 Flash 检查点已确认到块 \(index)。")
+            }
+        } else {
+            appendLog("设备请求初始块 \(index)。")
+        }
+
+        completePayloadWritten = false
+        highestAcknowledgedIndex = index
+        verifiedWindowStart = index
+        verifiedWindowEnd = min(
+            ((index / TodooBluetoothConstants.verifiedWindowBlocks) + 1)
+                * TodooBluetoothConstants.verifiedWindowBlocks,
+            total
+        )
+        nextBlockIndex = index
+        earlyVerifiedRequestedBlock = nil
+        phase = .sendingData
+        appendLog("耐久窗口：[\(verifiedWindowStart), \(verifiedWindowEnd)) / \(total) 块。")
+        pumpVerifiedWindow()
+    }
+
+    private func pumpVerifiedWindow() {
+        guard usesVerifiedWindows, isSending, phase == .sendingData,
+              let payload = transferPayload,
+              let peripheral = activePeripheral,
+              let characteristic = dataCharacteristic else { return }
+        let supportsNoResponse = characteristic.properties.contains(.writeWithoutResponse)
+        let supportsResponse = characteristic.properties.contains(.write)
+        guard supportsNoResponse || supportsResponse else {
+            failTransfer("数据特征不支持任何写入模式。")
+            return
+        }
+
+        windowTask?.cancel()
+        verifiedWindowSending = true
+        let identifier = transferID
+        windowTask = Task { [weak self] in
+            guard let self else { return }
+            var index = self.nextBlockIndex
+            while index < self.verifiedWindowEnd {
+                guard !Task.isCancelled, self.transferID == identifier else { return }
+                let isBoundary = index + 1 >= self.verifiedWindowEnd
+                do {
+                    guard let block = try makeDataBlock(
+                        payload: payload,
+                        index: UInt32(index),
+                        blockPayloadSize: self.blockPayloadSize
+                    ) else { throw TransferProtocolError.invalidBlockIndex }
+
+                    if supportsResponse, isBoundary || !supportsNoResponse {
+                        self.recordVerifiedWrite(block, index: index)
+                        self.nextBlockIndex = index + 1
+                        self.dataResponsePurpose = isBoundary
+                            ? .verifiedWindowBoundary : .verifiedBlock
+                        peripheral.writeValue(block.packet, for: characteristic, type: .withResponse)
+                        return
+                    }
+
+                    var readinessChecks = 0
+                    while !peripheral.canSendWriteWithoutResponse {
+                        try? await Task.sleep(nanoseconds: 5_000_000)
+                        guard !Task.isCancelled else { return }
+                        readinessChecks += 1
+                        if readinessChecks >= 1_000 {
+                            self.failTransfer("等待数据特征写入额度超时。")
+                            return
+                        }
+                    }
+                    peripheral.writeValue(block.packet, for: characteristic, type: .withoutResponse)
+                    self.recordVerifiedWrite(block, index: index)
+                    index += 1
+                    self.nextBlockIndex = index
+                } catch {
+                    self.failTransfer(error.localizedDescription)
+                    return
+                }
+            }
+            guard !Task.isCancelled, self.transferID == identifier else { return }
+            self.finishQueuedVerifiedWindow()
+        }
+    }
+
+    private func recordVerifiedWrite(_ block: DataBlock, index: Int) {
+        dataWrites += 1
+        if index <= lastSentBlockIndex { retransmittedBlocks += 1 }
+        lastSentBlockIndex = max(lastSentBlockIndex, index)
+        highestSentExclusive = max(highestSentExclusive, index + 1)
+        if let payload = transferPayload {
+            progress = max(progress, Double(block.written) / Double(payload.count))
+        }
+    }
+
+    private func finishQueuedVerifiedWindow() {
+        windowTask = nil
+        verifiedWindowSending = false
+        let isFinalWindow = verifiedWindowEnd >= totalBlocks
+        if isFinalWindow { completePayloadWritten = true }
+
+        if finalTransferAckReceived, completePayloadWritten {
+            completeTransfer(finalAck: "05 08 00 00 00 00")
+            return
+        }
+        if let early = earlyVerifiedRequestedBlock {
+            earlyVerifiedRequestedBlock = nil
+            beginVerifiedWindow(at: early)
+            return
+        }
+        if isFinalWindow {
+            phase = .waitingFinal
+            statusText = "等待卡片刷新…"
+            appendLog("Payload 队列已完成；等待必需的最终 05 08 ACK。")
+            armVerifiedFinalDeadline()
+        } else {
+            appendLog("窗口已排入到块 \(verifiedWindowEnd)；等待设备耐久 Flash 检查点。")
+            armVerifiedCheckpointDeadline()
+        }
+    }
+
+    private func handleVerifiedAcknowledgement(_ index: Int) {
+        guard index >= 0, index <= totalBlocks else {
+            failTransfer("设备确认索引 \(index) 超出 Payload 范围。")
+            return
+        }
+        deadlineTask?.cancel()
+        if verifiedWindowSending || dataResponsePurpose != nil {
+            earlyVerifiedRequestedBlock = index
+            appendLog("设备检查点在本地队列收尾时到达：请求块 \(index)。")
+            return
+        }
+        beginVerifiedWindow(at: index)
+    }
+
+    private func armVerifiedCheckpointDeadline() {
+        deadlineTask?.cancel()
+        let identifier = transferID
+        let expectedStart = verifiedWindowStart
+        let expectedEnd = verifiedWindowEnd
+        deadlineTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self,
+                  self.transferID == identifier,
+                  self.isSending,
+                  !self.verifiedWindowSending,
+                  self.verifiedWindowStart == expectedStart,
+                  self.verifiedWindowEnd == expectedEnd else { return }
+            guard self.repairRequestCount < 16 else {
+                self.failTransfer("连续 16 次未取得设备耐久检查点。")
+                return
+            }
+            self.repairRequestCount += 1
+            let probeIndex = max(expectedEnd - 1, expectedStart)
+            guard let payload = self.transferPayload,
+                  let peripheral = self.activePeripheral,
+                  let characteristic = self.dataCharacteristic,
+                  let block = try? makeDataBlock(
+                    payload: payload,
+                    index: UInt32(probeIndex),
+                    blockPayloadSize: self.blockPayloadSize
+                  ) else {
+                self.failTransfer("无法构造检查点探测块 \(probeIndex)。")
+                return
+            }
+            self.dataWrites += 1
+            self.retransmittedBlocks += 1
+            let type: CBCharacteristicWriteType = characteristic.properties.contains(.write)
+                ? .withResponse : .withoutResponse
+            self.appendLog(
+                "检查点超时；仅重发窗口末块 \(probeIndex) 查询设备进度（\(self.repairRequestCount)/16）。"
+            )
+            if type == .withResponse { self.dataResponsePurpose = .checkpointProbe }
+            peripheral.writeValue(block.packet, for: characteristic, type: type)
+            if type == .withoutResponse { self.armVerifiedCheckpointDeadline() }
+        }
+    }
+
+    private func armVerifiedFinalDeadline() {
+        deadlineTask?.cancel()
+        let identifier = transferID
+        deadlineTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled, let self,
+                  self.transferID == identifier, self.isSending else { return }
+            self.failTransfer("等待卡片最终 05 08 刷新确认超时。")
+        }
+    }
+
+    private func handleDataWriteResponse(error: Error?) {
+        guard let purpose = dataResponsePurpose else { return }
+        dataResponsePurpose = nil
+        if let error {
+            failTransfer("数据窗口边界写入失败：\(error.localizedDescription)")
+            return
+        }
+        lastGATTActivityAt = Date()
+        switch purpose {
+        case .verifiedBlock:
+            appendLog("数据块 ATT 写入已确认。")
+        case .verifiedWindowBoundary:
+            appendLog("数据窗口边界 ATT 写入已确认。")
+        case .checkpointProbe:
+            appendLog("检查点探测块 ATT 写入已确认。")
+        }
+        if let early = earlyVerifiedRequestedBlock {
+            earlyVerifiedRequestedBlock = nil
+            verifiedWindowSending = false
+            beginVerifiedWindow(at: early)
+            return
+        }
+        switch purpose {
+        case .verifiedBlock:
+            pumpVerifiedWindow()
+        case .verifiedWindowBoundary:
+            finishQueuedVerifiedWindow()
+        case .checkpointProbe:
+            armVerifiedCheckpointDeadline()
+        }
+    }
+
+    private func transferErrorMessage(status: UInt8?, bytes: Data) -> String {
+        switch status {
+        case TransferStatus.malformedOrOutOfOrder:
+            return "设备拒绝了格式错误或乱序的图片块（状态 0x01）。"
+        case TransferStatus.flashWriteFailure:
+            return "设备外部 Flash 写入失败（状态 0x09）。"
+        case TransferStatus.flashReadbackFailure:
+            return "设备外部 Flash 回读验证失败（状态 0x0A）。"
+        default:
+            return "设备中断图片传输：\(bytes.hexString)"
+        }
+    }
+
     private func armDeadline(seconds: UInt64, message: String) {
         let identifier = transferID
         deadlineTask?.cancel()
@@ -876,6 +1294,9 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         transferConnectionRecoveryAttempts = 0
         progress = 1
         pendingPayload = nil
+        transferPayload = nil
+        dataResponsePurpose = nil
+        pendingTransferFailure = nil
         statusText = "发送成功，连接已保持"
         rememberActiveDevice()
         appendLog("收到最终 ACK \(finalAck)；写入 \(dataWrites) 块，重传 \(retransmittedBlocks) 块。")
@@ -930,6 +1351,36 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         Self.preferences.dictionary(forKey: Self.deviceAliasesKey) as? [String: String] ?? [:]
     }
 
+    private func applyProtocolMetadata(_ advertisement: TodooAdvertisement, for identifier: UUID) {
+        activeFirmwareVersion = advertisement.firmwareVersion
+        activeCapabilityFlags = advertisement.capabilityFlags
+        activeProtocolMetadataVerified = true
+        persistProtocolMetadata(advertisement, for: identifier)
+    }
+
+    private func persistProtocolMetadata(_ advertisement: TodooAdvertisement, for identifier: UUID) {
+        var versions = Self.preferences.dictionary(forKey: Self.firmwareVersionsKey) ?? [:]
+        versions[identifier.uuidString] = Int(advertisement.firmwareVersion)
+        Self.preferences.set(versions, forKey: Self.firmwareVersionsKey)
+        var flags = Self.preferences.dictionary(forKey: Self.capabilityFlagsKey) ?? [:]
+        flags[identifier.uuidString] = Int(advertisement.capabilityFlags)
+        Self.preferences.set(flags, forKey: Self.capabilityFlagsKey)
+    }
+
+    private func loadProtocolMetadataIfNeeded(for identifier: UUID) {
+        if let advertisement = advertisements[identifier] {
+            applyProtocolMetadata(advertisement, for: identifier)
+            return
+        }
+        let key = identifier.uuidString
+        if let value = Self.preferences.dictionary(forKey: Self.firmwareVersionsKey)?[key] as? NSNumber {
+            activeFirmwareVersion = UInt8(truncatingIfNeeded: value.intValue)
+        }
+        if let value = Self.preferences.dictionary(forKey: Self.capabilityFlagsKey)?[key] as? NSNumber {
+            activeCapabilityFlags = UInt8(truncatingIfNeeded: value.intValue)
+        }
+    }
+
     private func deviceAlias(for identifier: UUID) -> String? {
         deviceAliases[identifier.uuidString]
     }
@@ -953,6 +1404,52 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         connectedDeviceName = nil
     }
 
+    private func failTransfer(_ message: String) {
+        guard pendingTransferFailure == nil else { return }
+        windowTask?.cancel()
+        deadlineTask?.cancel()
+        controlFallbackTask?.cancel()
+        dataResponsePurpose = nil
+        verifiedWindowSending = false
+        pendingTransferFailure = message
+        appendLog("传输失败：\(message)")
+
+        if (activeFirmwareVersion ?? 0) >= TodooBluetoothConstants.imageAckDiagnosticsMinimum,
+           let peripheral = activePeripheral,
+           peripheral.state == .connected,
+           let characteristic = diagnosticsCharacteristic,
+           characteristic.properties.contains(.read) {
+            statusText = "正在读取设备传输诊断…"
+            appendLog("退出前读取设备保留的 image-ACK 诊断。")
+            peripheral.readValue(for: characteristic)
+            diagnosticReadTask?.cancel()
+            diagnosticReadTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard !Task.isCancelled, let self, self.pendingTransferFailure != nil else { return }
+                self.appendLog("读取 image-ACK 诊断超时。")
+                self.finishPendingTransferFailure(diagnostics: nil)
+            }
+            return
+        }
+        if (activeFirmwareVersion ?? 0) >= TodooBluetoothConstants.imageAckDiagnosticsMinimum {
+            appendLog("当前链路无法读取 image-ACK 诊断；重新连接后可从诊断特征读取保留状态。")
+        }
+        finishPendingTransferFailure(diagnostics: nil)
+    }
+
+    private func finishPendingTransferFailure(diagnostics: ImageAckDiagnostics?) {
+        diagnosticReadTask?.cancel()
+        diagnosticReadTask = nil
+        guard let message = pendingTransferFailure else { return }
+        pendingTransferFailure = nil
+        var finalMessage = message
+        if let diagnostics {
+            appendLog("设备 image-ACK 诊断：\(diagnostics.logDescription)")
+            finalMessage += " 设备最后接收块为 \(diagnostics.lastReceivedBlock)，请求块为 \(diagnostics.requestedBlock)。"
+        }
+        fail(finalMessage)
+    }
+
     private func fail(_ message: String) {
         let unreadyPeripheral = isConnecting && !isConnected ? activePeripheral : nil
         var peripheralToRetry: CBPeripheral?
@@ -961,10 +1458,14 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         controlFallbackTask?.cancel()
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
+        diagnosticReadTask?.cancel()
         pendingControlWrite = nil
         automaticSendPayload = nil
         isFindingCurrentDevice = false
         pendingPayload = nil
+        transferPayload = nil
+        dataResponsePurpose = nil
+        pendingTransferFailure = nil
         phase = .idle
         isSending = false
         isConnecting = false
@@ -1042,6 +1543,7 @@ final class TodooBluetoothManager: NSObject, ObservableObject {
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
         reconnectTask?.cancel()
+        diagnosticReadTask?.cancel()
         pendingControlWrite = nil
         isSending = false
         isPreparingTransfer = true
@@ -1148,6 +1650,7 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
               let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
               let peripheral = peripherals.first(where: { $0.identifier == identifier }) else { return }
         activePeripheral = peripheral
+        loadProtocolMetadataIfNeeded(for: identifier)
         peripheral.delegate = self
         shouldMaintainConnection = true
         isConnecting = true
@@ -1170,6 +1673,7 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
               advertisement.isCompatible else { return }
         peripherals[peripheral.identifier] = peripheral
         advertisements[peripheral.identifier] = advertisement
+        persistProtocolMetadata(advertisement, for: peripheral.identifier)
         let name = peripheral.name
             ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
             ?? "TodooCard"
@@ -1212,6 +1716,7 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         reconnectTask?.cancel()
         reconnectAttempts = 0
         resetConnectionDiscovery()
+        loadProtocolMetadataIfNeeded(for: peripheral.identifier)
         isConnecting = true
         persistCurrentDevice(
             identifier: peripheral.identifier,
@@ -1237,20 +1742,28 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         guard peripheral.identifier == activePeripheral?.identifier else { return }
         let wasSending = isSending
         let wasRecoveringTransfer = reconnectingForTransfer
+        let retainedTransferFailure = pendingTransferFailure
         windowTask?.cancel()
         deadlineTask?.cancel()
         controlFallbackTask?.cancel()
         serviceRefreshTask?.cancel()
         handshakeTask?.cancel()
+        diagnosticReadTask?.cancel()
         resetConnectionDiscovery()
+        activeProtocolMetadataVerified = false
+        advertisements.removeValue(forKey: peripheral.identifier)
         isSending = false
         if wasSending {
             pendingPayload = nil
             isPreparingTransfer = false
         }
         appendLog("设备已断开：\(error?.localizedDescription ?? "正常断开")")
-        if wasSending { errorMessage = "传输过程中蓝牙连接断开。" }
-        if wasSending {
+        if let retainedTransferFailure {
+            pendingTransferFailure = retainedTransferFailure
+            appendLog("链路已断开，无法读取本次 image-ACK 诊断；保留原始设备错误。")
+            finishPendingTransferFailure(diagnostics: nil)
+        } else if wasSending {
+            errorMessage = "传输过程中蓝牙连接断开。"
             finishAutomaticTransfer(
                 .failure(AutomaticUpdateError.transferFailed("传输过程中蓝牙连接断开。"))
             )
@@ -1258,7 +1771,11 @@ extension TodooBluetoothManager: @preconcurrency CBCentralManagerDelegate {
         if wasRecoveringTransfer {
             appendLog("正在为待发送图片恢复有效的 GATT 会话。")
         }
-        if shouldMaintainConnection, central.state == .poweredOn {
+        if isFindingCurrentDevice, pendingPayload != nil, central.state == .poweredOn {
+            appendLog("连接已释放；开始扫描当前设备的厂商广播。")
+            startDiscovery()
+            statusText = "正在核验 \(connectedDeviceName ?? "当前设备")…"
+        } else if shouldMaintainConnection, central.state == .poweredOn {
             scheduleReconnect(to: peripheral)
         } else {
             clearConnection()
@@ -1288,6 +1805,19 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
             return
         }
 
+        if let diagnosticsService = services.first(where: {
+            $0.uuid == CBUUID(string: TodooBluetoothConstants.diagnosticsService)
+        }) {
+            if activeFirmwareVersion == nil {
+                activeFirmwareVersion = TodooBluetoothConstants.imageAckDiagnosticsMinimum
+                appendLog("广播固件版本不可用；由 image-ACK 诊断服务推断为 v165+。")
+            }
+            peripheral.discoverCharacteristics(
+                [CBUUID(string: TodooBluetoothConstants.imageAckDiagnostics)],
+                for: diagnosticsService
+            )
+        }
+
         guard let profile = TodooBluetoothConstants.transferProfiles.first(where: { profile in
             services.contains { $0.uuid == CBUUID(string: profile.service) }
         }), let transfer = services.first(where: { $0.uuid == CBUUID(string: profile.service) }) else {
@@ -1303,7 +1833,14 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        if let error { fail("发现特征失败：\(error.localizedDescription)"); return }
+        if let error {
+            if service.uuid == CBUUID(string: TodooBluetoothConstants.diagnosticsService) {
+                appendLog("发现可选 image-ACK 诊断特征失败：\(error.localizedDescription)")
+                return
+            }
+            fail("发现特征失败：\(error.localizedDescription)")
+            return
+        }
         let characteristics = service.characteristics ?? []
         if service.uuid == CBUUID(string: TodooBluetoothConstants.batteryService) {
             guard let battery = characteristics.first(where: {
@@ -1312,6 +1849,19 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
             batteryCharacteristic = battery
             appendLog("读取加密 Battery Level，以触发或验证系统绑定。")
             peripheral.readValue(for: battery)
+            return
+        }
+
+        if service.uuid == CBUUID(string: TodooBluetoothConstants.diagnosticsService) {
+            diagnosticsCharacteristic = characteristics.first(where: {
+                $0.uuid == CBUUID(string: TodooBluetoothConstants.imageAckDiagnostics)
+            })
+            if let diagnosticsCharacteristic {
+                appendLog(
+                    "image-ACK 诊断特征已就绪：read="
+                        + "\(diagnosticsCharacteristic.properties.contains(.read))。"
+                )
+            }
             return
         }
 
@@ -1373,6 +1923,7 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
             selectedProfile = nil
             controlCharacteristic = nil
             dataCharacteristic = nil
+            diagnosticsCharacteristic = nil
             transferCharacteristicsReady = false
             controlNotificationsReady = false
             statusText = "正在刷新安全服务…"
@@ -1387,6 +1938,21 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
                 self.appendLog("安全缓存等待完成；重新发现全部服务与传输特征。")
                 peripheral.discoverServices(nil)
             }
+            return
+        }
+        if characteristic.uuid == CBUUID(string: TodooBluetoothConstants.imageAckDiagnostics) {
+            if let error {
+                appendLog("读取 image-ACK 诊断失败：\(error.localizedDescription)")
+                finishPendingTransferFailure(diagnostics: nil)
+                return
+            }
+            guard let value = characteristic.value,
+                  let diagnostics = parseImageAckDiagnostics(value) else {
+                appendLog("设备返回了无法解析的 image-ACK 诊断。")
+                finishPendingTransferFailure(diagnostics: nil)
+                return
+            }
+            finishPendingTransferFailure(diagnostics: diagnostics)
             return
         }
         guard characteristic.uuid == controlCharacteristic?.uuid else { return }
@@ -1406,6 +1972,10 @@ extension TodooBluetoothManager: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == dataCharacteristic?.uuid {
+            handleDataWriteResponse(error: error)
+            return
+        }
         guard characteristic.uuid == controlCharacteristic?.uuid else { return }
         if let error {
             if refreshConnectionForPendingTransfer(

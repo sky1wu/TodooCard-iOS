@@ -22,6 +22,10 @@
 		A0000000000000000000000D /* BingDailyWallpaper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000F /* BingDailyWallpaper.swift */; };
 		A0000000000000000000000E /* AutomaticImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AutomaticImageProcessor.swift */; };
 		A0000000000000000000000F /* DeviceScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* DeviceScreenSnapshot.swift */; };
+		A00000000000000000000010 /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
+		A00000000000000000000011 /* HealthSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* HealthSummary.swift */; };
+		A00000000000000000000012 /* HealthCardRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* HealthCardRenderer.swift */; };
+		A00000000000000000000013 /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* HealthMetrics.swift */; };
 		A10000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* ShareViewController.swift */; };
 		A10000000000000000000002 /* AutomaticImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AutomaticImageProcessor.swift */; };
 		A10000000000000000000003 /* ImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* ImageProcessor.swift */; };
@@ -31,14 +35,10 @@
 		A10000000000000000000007 /* Dithering.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* Dithering.swift */; };
 		A10000000000000000000008 /* PayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* PayloadBuilder.swift */; };
 		A10000000000000000000009 /* TransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* TransferProtocol.swift */; };
-		A00000000000000000000010 /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
+		A1000000000000000000000A /* TodooCardShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* TodooCardShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A1000000000000000000000B /* DeviceScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* DeviceScreenSnapshot.swift */; };
 		A1000000000000000000000C /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
-		A00000000000000000000011 /* HealthSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* HealthSummary.swift */; };
-		A00000000000000000000012 /* HealthCardRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* HealthCardRenderer.swift */; };
-		A00000000000000000000013 /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* HealthMetrics.swift */; };
 		A1000000000000000000000D /* HealthMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* HealthMetrics.swift */; };
-		A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* TodooCardShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -52,15 +52,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		D10000000000000000000004 /* Embed App Extensions */ = {
+		D10000000000000000000004 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */,
+				A1000000000000000000000A /* TodooCardShareExtension.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -116,7 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				C00000000000000000000002 /* TodooCardApp */,
-				C00000000000000000000003 /* TodooCore */,
+				C00000000000000000000003 /* Sources/TodooCore */,
 				C10000000000000000000001 /* TodooCardShareExtension */,
 				C00000000000000000000004 /* Products */,
 			);
@@ -144,7 +144,7 @@
 			path = TodooCardApp;
 			sourceTree = "<group>";
 		};
-		C00000000000000000000003 /* TodooCore */ = {
+		C00000000000000000000003 /* Sources/TodooCore */ = {
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000006 /* CardConstants.swift */,
@@ -186,7 +186,7 @@
 				D00000000000000000000001 /* Sources */,
 				D00000000000000000000002 /* Frameworks */,
 				D00000000000000000000003 /* Resources */,
-				D10000000000000000000004 /* Embed App Extensions */,
+				D10000000000000000000004 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -223,7 +223,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					E00000000000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
@@ -344,19 +344,52 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 3J7FRP45UP;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)");
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -366,16 +399,46 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 3J7FRP45UP;
 				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -387,7 +450,6 @@
 				CODE_SIGN_ENTITLEMENTS = TodooCardApp/TodooCard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TodooCardApp/Info.plist;
@@ -411,7 +473,6 @@
 				CODE_SIGN_ENTITLEMENTS = TodooCardApp/TodooCard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TodooCardApp/Info.plist;
 				MARKETING_VERSION = 1.3.0;
@@ -434,7 +495,6 @@
 				CODE_SIGN_ENTITLEMENTS = TodooCardShareExtension/TodooCardShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TodooCardShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -463,7 +523,6 @@
 				CODE_SIGN_ENTITLEMENTS = TodooCardShareExtension/TodooCardShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TodooCardShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

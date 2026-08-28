@@ -9,7 +9,72 @@ public enum TransferCommand {
 
 public enum TransferStatus {
     public static let success: UInt8 = 0
+    public static let malformedOrOutOfOrder: UInt8 = 1
     public static let transferEnd: UInt8 = 8
+    public static let flashWriteFailure: UInt8 = 9
+    public static let flashReadbackFailure: UInt8 = 10
+}
+
+public struct ImageAckDiagnostics: Equatable, Sendable {
+    public let session: UInt8
+    public let flags: UInt8
+    public let generatedCount: UInt16
+    public let notifyAttemptCount: UInt16
+    public let notifyAcceptedCount: UInt16
+    public let notifyRejectedCount: UInt16
+    public let requestedBlock: UInt32
+    public let previousBlockStatus: UInt8
+    public let lastNotifyResult: UInt8
+    public let lastReceivedBlock: UInt16
+
+    public var isActive: Bool { flags & 0x01 != 0 }
+    public var notificationPending: Bool { flags & 0x02 != 0 }
+    public var blockReceived: Bool { flags & 0x04 != 0 }
+    public var lastNotificationAccepted: Bool { flags & 0x08 != 0 }
+
+    public var logDescription: String {
+        String(
+            format: "session=%u active=%@ pending=%@ blockReceived=%@ lastAccepted=%@ "
+                + "generated=%u attempts=%u accepted=%u rejected=%u requestedBlock=%u "
+                + "previousStatus=0x%02X lastNotifyResult=0x%02X lastReceivedBlock=%u",
+            session,
+            isActive ? "yes" : "no",
+            notificationPending ? "yes" : "no",
+            blockReceived ? "yes" : "no",
+            lastNotificationAccepted ? "yes" : "no",
+            generatedCount,
+            notifyAttemptCount,
+            notifyAcceptedCount,
+            notifyRejectedCount,
+            requestedBlock,
+            previousBlockStatus,
+            lastNotifyResult,
+            lastReceivedBlock
+        )
+    }
+}
+
+public func parseImageAckDiagnostics(_ data: Data) -> ImageAckDiagnostics? {
+    guard data.count >= 20, data[0] == 0x27, data[1] == 0x01 else { return nil }
+    func uint16(_ offset: Int) -> UInt16 {
+        UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
+    }
+    let requested = UInt32(data[12])
+        | UInt32(data[13]) << 8
+        | UInt32(data[14]) << 16
+        | UInt32(data[15]) << 24
+    return ImageAckDiagnostics(
+        session: data[2],
+        flags: data[3],
+        generatedCount: uint16(4),
+        notifyAttemptCount: uint16(6),
+        notifyAcceptedCount: uint16(8),
+        notifyRejectedCount: uint16(10),
+        requestedBlock: requested,
+        previousBlockStatus: data[16],
+        lastNotifyResult: data[17],
+        lastReceivedBlock: uint16(18)
+    )
 }
 
 public struct ControlMessage: Equatable, Sendable {

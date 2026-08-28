@@ -26,9 +26,14 @@ public enum TodooBluetoothConstants {
     public static let manufacturerID: UInt16 = 0x5053
     public static let screenType: UInt16 = 0x134C
     public static let secureFirmwareMinimum: UInt8 = 0x8C
+    public static let verifiedTransferMinimum: UInt8 = 0x9D
+    public static let imageAckDiagnosticsMinimum: UInt8 = 0xA5
+    public static let verifiedWindowBlocks = 32
 
     public static let batteryService = "180F"
     public static let batteryLevel = "2A19"
+    public static let diagnosticsService = "D8B282F0-0F9B-4A7A-B5E8-8E6E5A3C1001"
+    public static let imageAckDiagnostics = "D8B282F0-0F9B-4A7A-B5E8-8E6E5A3C1003"
     public static let transferProfiles = [
         TransferProfile(service: "FEF0", control: "FEF1", data: "FEF2"),
         TransferProfile(service: "FDF0", control: "FDF1", data: "FDF2"),
@@ -57,6 +62,7 @@ public struct TodooAdvertisement: Equatable, Sendable {
     public let requiresEncryptedGATT: Bool
     public let pairingWindowOpen: Bool
     public let otaRecoveryMode: Bool
+    public let turboLink: Bool
     public let isCompatible: Bool
     public let rawHex: String
 }
@@ -98,6 +104,7 @@ public func parseTodooAdvertisement(_ data: Data) throws -> TodooAdvertisement {
         requiresEncryptedGATT: requiresEncryption,
         pairingWindowOpen: requiresEncryption && flags & 0x02 != 0,
         otaRecoveryMode: flags & 0x08 != 0,
+        turboLink: flags & 0x10 != 0,
         isCompatible: screen == TodooBluetoothConstants.screenType,
         rawHex: data.hexString
     )

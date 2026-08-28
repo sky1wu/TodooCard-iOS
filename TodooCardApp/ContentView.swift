@@ -16,9 +16,9 @@ private enum DevicePickerPurpose {
 /// 正在发出的这一次传输。发送成功后要靠它决定把哪张画面写进卡片快照与最近发送记录，
 /// 因此在按下发送的那一刻就把内容抓住，不再回头读随时可能被改动的编辑器状态。
 private struct OutgoingSend {
-  let payload: Data
+  let payload: T3PayloadSet
   let preview: UIImage?
-  /// 记进最近发送时要一并存下的原图与构图，来自记录本身的重发则不需要。
+  /// 只有用户手动选择的图片才带上原图并写入最近发送；生成内容与记录重发都不需要。
   let source: UIImage?
   let configuration: AutomaticImageConfiguration
   /// 来自最近发送记录时只把那条记录移到最前，不再多存一份同样的画面。
@@ -44,6 +44,8 @@ struct ContentView: View {
   @State private var importStatusText = "正在读取图片"
   /// 关闭预览只是回到主页，编辑器里的图片和构图都留着，随时能再进来。
   @State private var isEditing = false
+  /// Bing 壁纸、健康摘要等生成内容可以正常预览和发送，但不进入“最近发送”。
+  @State private var recordsCurrentImage = false
   @State private var outgoing: OutgoingSend?
   /// 发送成功后让主页的立体卡片重新读一次画面快照。
   @State private var screenRefreshToken = 0
@@ -136,7 +138,7 @@ struct ContentView: View {
       UIAccessibility.post(notification: .announcement, argument: "图片已成功发送到卡片")
     }
     .onChange(of: scenePhase) { phase in
-      // 分享扩展或快捷指令发完图回到 App 时，最近发送记录里可能多了一条。
+      // 分享扩展发完手动所选图片回到 App 时，最近发送记录里可能多了一条。
       if phase == .active { recents.refresh() }
     }
   }
@@ -331,7 +333,7 @@ struct ContentView: View {
     beginSend(
       payload: payload,
       preview: editor.previewImage,
-      source: source,
+      source: recordsCurrentImage ? source : nil,
       configuration: editor.configuration,
       recentID: nil
     )
@@ -345,6 +347,7 @@ struct ContentView: View {
       return
     }
     editor.restore(source: draft.source, configuration: draft.configuration)
+    recordsCurrentImage = true
     isEditing = true
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
@@ -367,7 +370,7 @@ struct ContentView: View {
   }
 
   private func beginSend(
-    payload: Data,
+    payload: T3PayloadSet,
     preview: UIImage?,
     source: UIImage?,
     configuration: AutomaticImageConfiguration,
@@ -387,16 +390,17 @@ struct ContentView: View {
   private func completeSend() {
     screenRefreshToken += 1
     guard let sent = outgoing else {
-      // 分享扩展或快捷指令发起的传输由它们各自写入记录，这里只把主页刷新一次。
+      // 不是本页发起的传输只需刷新主页；分享扩展会自行写入手动所选图片的记录。
       recents.refresh()
       return
     }
     outgoing = nil
+    if sent.recentID == nil { editor.markCurrentImageSent() }
     if let preview = sent.preview { DeviceScreenSnapshot.save(preview) }
     if let recentID = sent.recentID {
       recents.touch(recentID)
     } else if let preview = sent.preview, let source = sent.source {
-      recents.record(
+      recents.recordUserSelected(
         source: source,
         configuration: sent.configuration,
         preview: preview,
@@ -423,7 +427,10 @@ struct ContentView: View {
       guard let data = try await item.loadTransferable(type: Data.self) else {
         throw CocoaError(.fileReadCorruptFile)
       }
-      if editor.loadImage(data: data) { isEditing = true }
+      if editor.loadImage(data: data) {
+        recordsCurrentImage = true
+        isEditing = true
+      }
       selectedPhoto = nil
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
@@ -442,7 +449,10 @@ struct ContentView: View {
       let data = try await Task.detached(priority: .userInitiated) {
         try Data(contentsOf: url)
       }.value
-      if editor.loadImage(data: data) { isEditing = true }
+      if editor.loadImage(data: data) {
+        recordsCurrentImage = true
+        isEditing = true
+      }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "读取文件失败：\(error.localizedDescription)"
@@ -454,7 +464,10 @@ struct ContentView: View {
       editor.errorMessage = "剪贴板里没有可用的图片。"
       return
     }
-    if editor.loadImage(data: data) { isEditing = true }
+    if editor.loadImage(data: data) {
+      recordsCurrentImage = true
+      isEditing = true
+    }
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 
@@ -469,7 +482,10 @@ struct ContentView: View {
     defer { isImporting = false }
     do {
       let wallpaper = try await BingDailyWallpaperClient.fetchToday()
-      if editor.loadImage(data: wallpaper.data) { isEditing = true }
+      if editor.loadImage(data: wallpaper.data) {
+        recordsCurrentImage = false
+        isEditing = true
+      }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "获取 Bing 每日壁纸失败：\(error.localizedDescription)"
@@ -491,7 +507,10 @@ struct ContentView: View {
       let data = try HealthCardRenderer.renderPNG(snapshot)
       // 这张图是本机排版出来的纯色文字，抖动只会把笔画糊成噪点，直接按最近色量化。
       // 写全类型名：可选参数上的 .none 会被当成 Optional.none。
-      if editor.loadImage(data: data, preferredAlgorithm: DitherAlgorithm.none) { isEditing = true }
+      if editor.loadImage(data: data, preferredAlgorithm: DitherAlgorithm.none) {
+        recordsCurrentImage = false
+        isEditing = true
+      }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "生成今日健康摘要失败：\(error.localizedDescription)"
@@ -1032,7 +1051,8 @@ private struct ResumeEditingCard: View {
   private var subtitle: String {
     if editor.isProcessing { return "正在生成预览" }
     let zoom = editor.zoom.formatted(.number.precision(.fractionLength(1)))
-    return "\(editor.algorithm.shortTitle) · \(zoom)× · 尚未发送"
+    let sendStatus = editor.isCurrentImageSent ? "已发送" : "尚未发送"
+    return "\(editor.algorithm.shortTitle) · \(zoom)× · \(sendStatus)"
   }
 }
 
@@ -1877,7 +1897,17 @@ private struct DiagnosticsView: View {
             )
           )
           LabeledContent(
-            "Payload", value: editor.payload.map { "\($0.count.formatted()) 字节" } ?? "—")
+            "新版压缩 Payload",
+            value: editor.payload?.currentCompressed.map { "\($0.count.formatted()) 字节" } ?? "—"
+          )
+          LabeledContent(
+            "旧版兼容 Payload",
+            value: editor.payload.map { "\($0.legacyCompressed.count.formatted()) 字节" } ?? "—"
+          )
+          LabeledContent(
+            "RAW Payload",
+            value: editor.payload?.controllerRaw.map { "\($0.count.formatted()) 字节" } ?? "—"
+          )
           VStack(alignment: .leading, spacing: 6) {
             Text("SHA-256")
             Text(editor.payloadSHA256)
@@ -1896,6 +1926,10 @@ private struct DiagnosticsView: View {
             value: bluetooth.rememberedAutomationDeviceName ?? "未设置（先手动发送一次）"
           )
           LabeledContent("厂商 / 屏幕", value: "0x5053 / 0x134C")
+          LabeledContent(
+            "固件",
+            value: bluetooth.connectedFirmwareVersion.map { String(format: "0x%02X", $0) } ?? "—"
+          )
         }
 
         Section("运行日志") {
@@ -1955,9 +1989,12 @@ private struct DiagnosticsView: View {
       App: \(version) (\(build))
       状态: \(bluetooth.statusText)
       图片: 528 × 792 / \(editor.algorithm.shortTitle) / 亮度 \(editor.brightnessCompensation.formatted(.percent.precision(.fractionLength(0)).sign(strategy: .always())))
-      Payload: \(editor.payload.map { "\($0.count) 字节" } ?? "—")
+      Payload (v157+ QuickLZ): \(editor.payload?.currentCompressed.map { "\($0.count) 字节" } ?? "—")
+      Payload (legacy): \(editor.payload.map { "\($0.legacyCompressed.count) 字节" } ?? "—")
+      Payload (RAW): \(editor.payload?.controllerRaw.map { "\($0.count) 字节" } ?? "—")
       SHA-256: \(editor.payloadSHA256)
       设备: \(bluetooth.connectedDeviceName ?? "未连接")
+      固件: \(bluetooth.connectedFirmwareVersion.map { String(format: "0x%02X", $0) } ?? "—")
       电量: \(bluetooth.batteryLevel.map { "\($0)%" } ?? "—")
 
       日志:

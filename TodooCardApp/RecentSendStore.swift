@@ -19,17 +19,16 @@ struct RecentSendDraft {
 
 /// 最近成功发送到卡片的画面。每条记录存四份东西：
 /// 原图副本（长边缩到 2048 的 JPEG）与当时的构图用来回到编辑器继续调整；
-/// payload 原样保留，长按重新发送时不必再解码抖动一遍，画面与当初完全一致；
+/// 三种固件 Payload 原样保留，长按重新发送时仍能按目标固件选择正确线格式；
 /// 六色画面用于发送成功后回填卡片外观；彩色缩略图供主页列表展示。
 ///
-/// 和 `DeviceScreenSnapshot` 一样放在 App Group 容器里，分享扩展与快捷指令发出的图片
-/// 主 App 也能读到；免费 Apple Account 拿不到 App Group 时退回各自沙盒，功能降级但不失效。
+/// 和 `DeviceScreenSnapshot` 一样放在 App Group 容器里，分享扩展里手动选中的图片主 App
+/// 也能读到；免费 Apple Account 拿不到 App Group 时退回各自沙盒，功能降级但不失效。
 ///
 /// 索引是整份改写的，主 App 与分享扩展同时发送时后写入的一方会覆盖对方的这一条记录；
 /// 记录本身不影响发送结果，因此这里不引入文件协调的额外开销。
 enum RecentSendStore {
-    /// 一条记录约 0.8 MB：原图副本和 payload 各占一半，六色画面与缩略图很小；
-    /// 12 条把占用控制在 10 MB 以内。
+    /// 一条记录约 1 MB；12 条通常仍能把总占用控制在十几 MB。
     static let limit = 12
 
     private static let directoryName = "recent-sends"
@@ -79,12 +78,13 @@ enum RecentSendStore {
         let framing: Framing?
     }
 
-    /// 记下一次成功发送。写盘失败时静默放弃：记录只是便利功能，不该影响发送流程。
-    static func record(
+    /// 记下一次用户手动所选图片的成功发送。写盘失败时静默放弃：记录只是便利功能，
+    /// 不该影响发送流程。
+    static func recordUserSelected(
         source: UIImage,
         configuration: AutomaticImageConfiguration,
         preview: UIImage,
-        payload: Data
+        payload: T3PayloadSet
     ) {
         guard let directory = directoryURL else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -109,7 +109,14 @@ enum RecentSendStore {
             try sourceData.write(to: sourceURL(id, in: directory), options: .atomic)
             try thumbnailData.write(to: thumbnailURL(id, in: directory), options: .atomic)
             try previewData.write(to: previewURL(id, in: directory), options: .atomic)
-            try payload.write(to: payloadURL(id, in: directory), options: .atomic)
+            // 保留原文件名存 legacy 流，让旧版本 App 仍可读取这条记录。
+            try payload.legacyCompressed.write(to: payloadURL(id, in: directory), options: .atomic)
+            if let current = payload.currentCompressed {
+                try current.write(to: currentPayloadURL(id, in: directory), options: .atomic)
+            }
+            if let raw = payload.controllerRaw {
+                try raw.write(to: rawPayloadURL(id, in: directory), options: .atomic)
+            }
         } catch {
             deleteFiles(for: id, in: directory)
             return
@@ -123,15 +130,15 @@ enum RecentSendStore {
         saveEntries(trimmed(entries, in: directory))
     }
 
-    /// 分享扩展和快捷指令手里只有原始数据，解码一次交给上面的实现。
-    static func record(
+    /// 分享扩展手里只有用户所选图片的原始数据，解码一次交给上面的实现。
+    static func recordUserSelected(
         sourceData: Data,
         configuration: AutomaticImageConfiguration,
         preview: UIImage,
-        payload: Data
+        payload: T3PayloadSet
     ) {
         guard let source = UIImage(data: sourceData) else { return }
-        record(
+        recordUserSelected(
             source: ImageProcessor.normalized(source),
             configuration: configuration,
             preview: preview,
@@ -190,9 +197,12 @@ enum RecentSendStore {
         return RecentSendDraft(source: source, configuration: framing.configuration)
     }
 
-    static func payload(for id: UUID) -> Data? {
+    static func payload(for id: UUID) -> T3PayloadSet? {
         guard let directory = directoryURL else { return nil }
-        return try? Data(contentsOf: payloadURL(id, in: directory))
+        guard let legacy = try? Data(contentsOf: payloadURL(id, in: directory)) else { return nil }
+        let current = try? Data(contentsOf: currentPayloadURL(id, in: directory))
+        let raw = try? Data(contentsOf: rawPayloadURL(id, in: directory))
+        return T3PayloadSet(currentCompressed: current, legacyCompressed: legacy, controllerRaw: raw)
     }
 
     static func preview(for id: UUID) -> UIImage? {
@@ -230,6 +240,8 @@ enum RecentSendStore {
             thumbnailURL(id, in: directory),
             previewURL(id, in: directory),
             payloadURL(id, in: directory),
+            currentPayloadURL(id, in: directory),
+            rawPayloadURL(id, in: directory),
         ]
         for url in urls { try? FileManager.default.removeItem(at: url) }
     }
@@ -248,6 +260,14 @@ enum RecentSendStore {
 
     private static func payloadURL(_ id: UUID, in directory: URL) -> URL {
         directory.appendingPathComponent("\(id.uuidString).payload")
+    }
+
+    private static func currentPayloadURL(_ id: UUID, in directory: URL) -> URL {
+        directory.appendingPathComponent("\(id.uuidString)-current.payload")
+    }
+
+    private static func rawPayloadURL(_ id: UUID, in directory: URL) -> URL {
+        directory.appendingPathComponent("\(id.uuidString)-raw.payload")
     }
 
     private static func image(at url: URL) -> UIImage? {
@@ -297,15 +317,15 @@ final class RecentSendLibrary: ObservableObject {
         items = RecentSendStore.items()
     }
 
-    func record(
+    func recordUserSelected(
         source: UIImage,
         configuration: AutomaticImageConfiguration,
         preview: UIImage,
-        payload: Data
+        payload: T3PayloadSet
     ) {
         Task { [weak self] in
             await Task.detached(priority: .utility) {
-                RecentSendStore.record(
+                RecentSendStore.recordUserSelected(
                     source: source,
                     configuration: configuration,
                     preview: preview,
