@@ -15,7 +15,8 @@ enum HealthCardRenderError: LocalizedError {
 
 /// 六色电子纸只有黑、白、黄、红、蓝、绿六种墨水，没有灰阶。任何浅灰的分隔线和
 /// 次要文字量化后都会直接变成白色消失，所以这张卡片只用纯色作画：文字一律纯黑，
-/// 强调色一律取调色板里的原色，线宽不小于 2 点。
+/// 强调色一律取调色板里的原色，线宽不小于 2 点。画布按 1 倍比例输出，字号就是最终
+/// 像素大小；实机上小于 15 的字很难辨认，因此正文不再使用更小的字号。
 private enum Ink {
   static let black = UIColor(red: 0, green: 0, blue: 0, alpha: 1)
   static let white = UIColor(red: 1, green: 1, blue: 1, alpha: 1)
@@ -53,7 +54,6 @@ enum HealthCardRenderer {
       drawActivity(snapshot)
       drawSleep(snapshot)
       drawStats(snapshot)
-      drawFooter(snapshot)
     }
   }
 
@@ -61,16 +61,16 @@ enum HealthCardRenderer {
 
   private static func drawHeader(_ snapshot: HealthSummarySnapshot) {
     let date = snapshot.generatedAt
-    draw(text(dayFormatter.string(from: date), font(34, .bold)), at: CGPoint(x: margin, y: 26))
+    draw(text(dayFormatter.string(from: date), font(40, .bold)), at: CGPoint(x: margin, y: 20))
     let subtitle = "\(weekdayFormatter.string(from: date)) · 更新于 \(timeFormatter.string(from: date))"
-    draw(text(subtitle, font(14, .medium)), at: CGPoint(x: margin, y: 76))
+    draw(text(subtitle, font(18, .semibold)), at: CGPoint(x: margin, y: 74))
 
-    let label = text("健康摘要", font(14, .semibold))
+    let label = text("健康摘要", font(18, .bold))
     let labelSize = label.size()
-    draw(label, at: CGPoint(x: contentRight - labelSize.width, y: 36))
-    let heart = symbol("heart.fill", pointSize: 17, weight: .semibold, color: Ink.red)
+    draw(label, at: CGPoint(x: contentRight - labelSize.width, y: 34))
+    let heart = symbol("heart.fill", pointSize: 20, weight: .bold, color: Ink.red)
     if let heart {
-      heart.draw(at: CGPoint(x: contentRight - labelSize.width - 8 - heart.size.width, y: 38))
+      heart.draw(at: CGPoint(x: contentRight - labelSize.width - 9 - heart.size.width, y: 36))
     }
 
     rule(y: 108)
@@ -99,11 +99,9 @@ enum HealthCardRenderer {
 
     let legendX = margin + 236
     guard snapshot.move != nil || snapshot.exercise != nil || snapshot.stand != nil else {
-      draw(text("未获取到活动圆环", font(15, .semibold)), at: CGPoint(x: legendX, y: 236))
-      draw(
-        text("需要 Apple Watch 或「健身记录」", font(12, .regular)),
-        at: CGPoint(x: legendX, y: 262)
-      )
+      draw(text("未获取到活动圆环", font(18, .bold)), at: CGPoint(x: legendX, y: 224))
+      draw(text("需要 Apple Watch", font(15, .semibold)), at: CGPoint(x: legendX, y: 254))
+      draw(text("或「健身记录」数据", font(15, .semibold)), at: CGPoint(x: legendX, y: 276))
       return
     }
 
@@ -128,21 +126,21 @@ enum HealthCardRenderer {
     y: CGFloat
   ) {
     chip(color: color, at: CGPoint(x: x, y: y + 3), side: 12)
-    draw(text(title, font(14, .semibold)), at: CGPoint(x: x + 20, y: y))
+    draw(text(title, font(18, .bold)), at: CGPoint(x: x + 20, y: y - 2))
 
     guard let metric, metric.goal > 0 else {
-      draw(text("—", font(24, .bold, rounded: true)), at: CGPoint(x: x, y: y + 22))
+      draw(text("—", font(30, .bold, rounded: true)), at: CGPoint(x: x, y: y + 20))
       return
     }
 
-    let percent = text("\(metric.percent)%", font(14, .bold, rounded: true))
-    draw(percent, at: CGPoint(x: contentRight - percent.size().width, y: y))
+    let percent = text("\(metric.percent)%", font(18, .bold, rounded: true))
+    draw(percent, at: CGPoint(x: contentRight - percent.size().width, y: y - 2))
 
     let value = composed([
-      (formatGroupedNumber(Int(metric.value.rounded())), font(26, .bold, rounded: true)),
-      (" / \(formatGroupedNumber(Int(metric.goal.rounded()))) \(unit)", font(13, .medium)),
+      (formatGroupedNumber(Int(metric.value.rounded())), font(30, .bold, rounded: true)),
+      (" / \(formatGroupedNumber(Int(metric.goal.rounded()))) \(unit)", font(16, .semibold)),
     ])
-    draw(value, at: CGPoint(x: x, y: y + 22))
+    draw(value, at: CGPoint(x: x, y: y + 21))
   }
 
   /// 画一圈圆环：先描出整圈的黑色轮廓，再把已完成的那一段填成实色。
@@ -194,32 +192,32 @@ enum HealthCardRenderer {
     drawSectionTitle(symbol: "bed.double.fill", title: "睡眠", y: 396)
 
     guard let sleep = snapshot.sleep else {
-      draw(text("昨晚没有读到睡眠记录", font(16, .semibold)), at: CGPoint(x: margin, y: 434))
-      draw(
-        text("戴表入睡或在「健康」中记录睡眠后，这里会显示时长、阶段与评分。", font(12, .regular)),
-        at: CGPoint(x: margin, y: 462)
-      )
+      draw(text("昨晚没有读到睡眠记录", font(19, .bold)), at: CGPoint(x: margin, y: 432))
+      draw(text("戴表入睡或在「健康」中记录睡眠后，", font(16, .medium)),
+           at: CGPoint(x: margin, y: 466))
+      draw(text("这里会显示时长、阶段与评分。", font(16, .medium)),
+           at: CGPoint(x: margin, y: 490))
       return
     }
 
     if let start = sleep.start, let end = sleep.end {
       let range = "\(timeFormatter.string(from: start)) → \(timeFormatter.string(from: end))"
-      let rangeText = text(range, font(13, .medium))
+      let rangeText = text(range, font(16, .semibold))
       draw(rangeText, at: CGPoint(x: contentRight - rangeText.size().width, y: 398))
     }
 
     let score = composed([
       ("\(sleep.score.value)", font(46, .bold, rounded: true)),
-      (" 分", font(14, .medium)),
+      (" 分", font(18, .semibold)),
     ])
     draw(score, at: CGPoint(x: margin, y: 424))
     chip(color: gradeColor(sleep.score.grade), at: CGPoint(x: margin + 1, y: 490), side: 10)
     draw(
-      text("睡眠评分 · \(sleep.score.grade.title)", font(12, .medium)),
-      at: CGPoint(x: margin + 18, y: 486)
+      text("睡眠评分 · \(sleep.score.grade.title)", font(16, .semibold)),
+      at: CGPoint(x: margin + 18, y: 483)
     )
 
-    let duration = text(formatSleepDuration(sleep.totals.asleep), font(28, .bold, rounded: true))
+    let duration = text(formatSleepDuration(sleep.totals.asleep), font(32, .bold, rounded: true))
     draw(duration, at: CGPoint(x: contentRight - duration.size().width, y: 434))
     // 醒来次数只有 HealthKit 分段才数得出来，快捷指令传进来的数据没有这一项。
     let awake: String
@@ -230,8 +228,8 @@ enum HealthCardRenderer {
     } else {
       awake = "清醒 \(formatCompactDuration(sleep.totals.awake))"
     }
-    let awakeText = text(awake, font(12, .medium))
-    draw(awakeText, at: CGPoint(x: contentRight - awakeText.size().width, y: 486))
+    let awakeText = text(awake, font(16, .semibold))
+    draw(awakeText, at: CGPoint(x: contentRight - awakeText.size().width, y: 483))
 
     drawSleepStages(sleep)
   }
@@ -284,10 +282,10 @@ enum HealthCardRenderer {
     for (index, segment) in segments.enumerated() {
       let x = margin + columnWidth * CGFloat(index)
       chip(color: segment.color, at: CGPoint(x: x, y: 553), side: 10)
-      draw(text(segment.title, font(12, .semibold)), at: CGPoint(x: x + 16, y: 549))
+      draw(text(segment.title, font(15, .bold)), at: CGPoint(x: x + 16, y: 547))
       draw(
-        text(formatCompactDuration(segment.seconds), font(12, .medium)),
-        at: CGPoint(x: x + 16, y: 567)
+        text(formatCompactDuration(segment.seconds), font(15, .semibold)),
+        at: CGPoint(x: x + 16, y: 568)
       )
     }
   }
@@ -325,7 +323,7 @@ enum HealthCardRenderer {
     }
 
     guard !tiles.isEmpty else {
-      draw(text("今天还没有步数或心率记录。", font(14, .medium)), at: CGPoint(x: margin, y: 660))
+      draw(text("今天还没有步数或心率记录。", font(20, .semibold)), at: CGPoint(x: margin, y: 684))
       return
     }
 
@@ -335,45 +333,45 @@ enum HealthCardRenderer {
     for (index, tile) in visible.enumerated() {
       let frame = CGRect(
         x: margin + (tileWidth + gap) * CGFloat(index),
-        y: 650,
+        y: 648,
         width: tileWidth,
-        height: 92
+        height: 126
       )
-      let box = UIBezierPath(roundedRect: frame, cornerRadius: 14)
+      let box = UIBezierPath(roundedRect: frame, cornerRadius: 16)
       Ink.black.setStroke()
       box.lineWidth = hairline
       box.stroke()
 
       var titleX = frame.minX + 14
-      if let icon = symbol(tile.symbol, pointSize: 12, weight: .semibold, color: Ink.black) {
-        icon.draw(at: CGPoint(x: titleX, y: frame.minY + 15))
+      if let icon = symbol(tile.symbol, pointSize: 17, weight: .bold, color: Ink.black) {
+        icon.draw(at: CGPoint(x: titleX, y: frame.minY + 20))
         titleX += icon.size.width + 5
       }
-      draw(text(tile.title, font(12, .semibold)), at: CGPoint(x: titleX, y: frame.minY + 13))
+      draw(text(tile.title, font(17, .bold)), at: CGPoint(x: titleX, y: frame.minY + 17))
+      // 三列时横向空间较紧；少于三列则把释放出来的宽度也交给主数值。
+      let valueSize: CGFloat
+      if visible.count == 3 {
+        valueSize = tile.value.count >= 7 ? 24 : 28
+      } else {
+        valueSize = tile.value.count >= 7 ? 30 : 32
+      }
       let value = composed([
-        (tile.value, font(24, .bold, rounded: true)),
-        (" \(tile.unit)", font(11, .medium)),
+        (tile.value, font(valueSize, .bold, rounded: true)),
+        (" \(tile.unit)", font(17, .semibold)),
       ])
-      draw(value, at: CGPoint(x: frame.minX + 14, y: frame.minY + 44))
+      draw(value, at: CGPoint(x: frame.minX + 14, y: frame.minY + 62))
     }
-  }
-
-  private static func drawFooter(_ snapshot: HealthSummarySnapshot) {
-    let note = snapshot.sleep?.score.usesStageDetail == false
-      ? "数据来自「健康」App · 未读到睡眠阶段，评分只按时长与连续性估算"
-      : "数据来自「健康」App · 睡眠评分由 TodooCard 在本机估算"
-    draw(text(note, font(11, .regular)), at: CGPoint(x: margin, y: 758))
   }
 
   // MARK: - 绘制基元
 
   private static func drawSectionTitle(symbol name: String, title: String, y: CGFloat) {
     var x = margin
-    if let icon = symbol(name, pointSize: 14, weight: .semibold, color: Ink.black) {
+    if let icon = symbol(name, pointSize: 18, weight: .bold, color: Ink.black) {
       icon.draw(at: CGPoint(x: x, y: y + 2))
       x += icon.size.width + 7
     }
-    draw(text(title, font(15, .semibold)), at: CGPoint(x: x, y: y))
+    draw(text(title, font(19, .bold)), at: CGPoint(x: x, y: y - 2))
   }
 
   private static func rule(y: CGFloat) {
