@@ -23,7 +23,6 @@ struct ContentView: View {
   @State private var showFileImporter = false
   @State private var showDevicePicker = false
   @State private var showDiagnostics = false
-  @State private var showRemoveConfirmation = false
   @State private var showRenameDevice = false
   @State private var deviceNameDraft = ""
   @State private var devicePickerPurpose = DevicePickerPurpose.connectAndSend
@@ -109,16 +108,6 @@ struct ContentView: View {
     } message: {
       Text("最多 24 个字符；名称仅保存在此 iPhone，不会修改设备固件或系统蓝牙名称。")
     }
-    .confirmationDialog(
-      "重新开始？",
-      isPresented: $showRemoveConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("移除当前图片", role: .destructive) { editor.clearImage() }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("当前构图与显示效果设置将被清除。")
-    }
     .onChange(of: bluetooth.statusText) { status in
       guard status.hasPrefix("发送成功") else { return }
       UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -131,7 +120,7 @@ struct ContentView: View {
     if editor.sourceImage != nil {
       ToolbarItem(placement: .navigationBarLeading) {
         Button {
-          showRemoveConfirmation = true
+          editor.clearImage()
         } label: {
           Image(systemName: "xmark")
         }
@@ -695,9 +684,10 @@ private final class DeviceTiltMotion: ObservableObject {
 
     let rollDegrees = relative.roll * 180 / .pi
     let pitchDegrees = relative.pitch * 180 / .pi
-    // 手机右侧后仰时卡片右侧迎向观察者，看起来卡片停在原地。
-    let targetYaw = clamped(-rollDegrees * responsiveness)
-    let targetPitch = clamped(pitchDegrees * responsiveness)
+    // 卡片跟随手机的姿态一起转，倾斜时像是在从新的角度打量它。
+    // 真机实测确认过方向：这两个符号一起决定观感，反过来会变成卡片朝相反方向躲。
+    let targetYaw = clamped(rollDegrees * responsiveness)
+    let targetPitch = clamped(-pitchDegrees * responsiveness)
     let nextYaw = yaw + (targetYaw - yaw) * smoothing
     let nextPitch = pitch + (targetPitch - pitch) * smoothing
 
@@ -911,7 +901,6 @@ private struct DeviceMatteTexture: View {
 private struct CardSheen: View {
   let cornerRadius: CGFloat
   let normal: CGSize
-  var strength: Double = 1
 
   var body: some View {
     GeometryReader { proxy in
@@ -923,9 +912,9 @@ private struct CardSheen: View {
         .fill(
           RadialGradient(
             gradient: Gradient(colors: [
-              Color.white.opacity(0.85 * strength),
-              Color.white.opacity(0.2 * strength),
-              Color.black.opacity(0.24 * strength),
+              Color.white.opacity(0.85),
+              Color.white.opacity(0.2),
+              Color.black.opacity(0.24),
             ]),
             center: center,
             startRadius: 0,
@@ -1034,12 +1023,6 @@ private struct PreviewCanvas: View {
         .padding(.top, screenTopInset)
         .contentShape(Rectangle())
         .gesture(cropGesture(in: screenSize))
-
-        CardSheen(
-          cornerRadius: cardCornerRadius,
-          normal: CGSize(width: 0.16, height: 0.12),
-          strength: 0.55
-        )
       }
       .frame(width: cardWidth, height: cardHeight)
       .shadow(color: AppTheme.shadow, radius: 22, y: 12)
