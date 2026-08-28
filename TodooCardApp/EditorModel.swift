@@ -36,20 +36,22 @@ final class EditorModel: ObservableObject {
             || abs(focusY - 50) > 0.001
     }
 
-    func loadImage(data: Data) {
+    /// 返回是否真的换上了新图片；失败时保留上一张图片和它的编辑状态。
+    @discardableResult
+    func loadImage(data: Data) -> Bool {
         guard data.count <= Self.maximumImageBytes else {
             errorMessage = "图片超过 100 MB 安全限制。"
-            return
+            return false
         }
         guard let decoded = UIImage(data: data) else {
             errorMessage = "无法解码这张图片，请改用 PNG、JPEG、HEIF 或 WebP。"
-            return
+            return false
         }
         let pixelWidth = decoded.cgImage?.width ?? Int(decoded.size.width * decoded.scale)
         let pixelHeight = decoded.cgImage?.height ?? Int(decoded.size.height * decoded.scale)
         guard pixelWidth * pixelHeight <= Self.maximumImagePixels else {
             errorMessage = "图片超过 5000 万像素安全限制。"
-            return
+            return false
         }
 
         processingTask?.cancel()
@@ -63,6 +65,7 @@ final class EditorModel: ObservableObject {
         focusY = 50
         errorMessage = nil
         scheduleProcessing()
+        return true
     }
 
     func clearImage() {

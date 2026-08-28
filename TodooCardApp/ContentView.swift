@@ -13,10 +13,21 @@ private enum DevicePickerPurpose {
   case changeConnection
 }
 
+/// 正在发出的这一次传输。发送成功后要靠它决定把哪张画面写进卡片快照与最近发送记录，
+/// 因此在按下发送的那一刻就把内容抓住，不再回头读随时可能被改动的编辑器状态。
+private struct OutgoingSend {
+  let payload: Data
+  let preview: UIImage?
+  /// 来自最近发送记录时只把那条记录移到最前，不再多存一份同样的画面。
+  let recentID: UUID?
+}
+
 struct ContentView: View {
   @StateObject private var editor = EditorModel()
   @StateObject private var bluetooth = TodooBluetoothManager.shared
+  @StateObject private var recents = RecentSendLibrary()
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.scenePhase) private var scenePhase
 
   @State private var selectedPhoto: PhotosPickerItem?
   @State private var showPhotoPicker = false
@@ -28,23 +39,30 @@ struct ContentView: View {
   @State private var devicePickerPurpose = DevicePickerPurpose.connectAndSend
   @State private var isImporting = false
   @State private var importStatusText = "正在读取图片"
+  /// 关闭预览只是回到主页，编辑器里的图片和构图都留着，随时能再进来。
+  @State private var isEditing = false
+  @State private var outgoing: OutgoingSend?
+  /// 发送成功后让主页的立体卡片重新读一次画面快照。
+  @State private var screenRefreshToken = 0
+
+  private var isShowingEditor: Bool { isEditing && editor.sourceImage != nil }
 
   var body: some View {
     NavigationStack {
       Group {
-        if editor.sourceImage == nil {
-          welcomeView
-        } else {
+        if isShowingEditor {
           editorWorkspace
+        } else {
+          welcomeView
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(AppTheme.canvas.ignoresSafeArea())
-      .navigationTitle(editor.sourceImage == nil ? "TodooCard" : "卡片预览")
+      .navigationTitle(isShowingEditor ? "卡片预览" : "TodooCard")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { appToolbar }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        if editor.sourceImage != nil {
+        if isShowingEditor {
           TransferDock(
             editor: editor,
             bluetooth: bluetooth,
@@ -77,8 +95,8 @@ struct ContentView: View {
         showDevicePicker = false
         switch devicePickerPurpose {
         case .connectAndSend:
-          guard let payload = editor.payload else { return }
-          bluetooth.connectAndSend(deviceID: device.id, payload: payload)
+          guard let outgoing else { return }
+          bluetooth.connectAndSend(deviceID: device.id, payload: outgoing.payload)
         case .changeConnection:
           bluetooth.connect(deviceID: device.id)
         }
@@ -110,28 +128,32 @@ struct ContentView: View {
     }
     .onChange(of: bluetooth.statusText) { status in
       guard status.hasPrefix("发送成功") else { return }
-      if let preview = editor.previewImage { DeviceScreenSnapshot.save(preview) }
+      completeSend()
       UINotificationFeedbackGenerator().notificationOccurred(.success)
       UIAccessibility.post(notification: .announcement, argument: "图片已成功发送到卡片")
+    }
+    .onChange(of: scenePhase) { phase in
+      // 分享扩展或快捷指令发完图回到 App 时，最近发送记录里可能多了一条。
+      if phase == .active { recents.refresh() }
     }
   }
 
   @ToolbarContentBuilder
   private var appToolbar: some ToolbarContent {
-    if editor.sourceImage != nil {
+    if isShowingEditor {
       ToolbarItem(placement: .navigationBarLeading) {
         Button {
-          editor.clearImage()
+          isEditing = false
         } label: {
-          Image(systemName: "xmark")
+          Image(systemName: "chevron.left")
         }
         .disabled(bluetooth.isBusy)
-        .accessibilityLabel("关闭当前图片")
+        .accessibilityLabel("返回主页面，保留当前编辑")
       }
     }
 
     ToolbarItemGroup(placement: .primaryAction) {
-      if editor.sourceImage != nil {
+      if isShowingEditor {
         importMenu.disabled(bluetooth.isBusy)
       }
       Button {
@@ -146,8 +168,16 @@ struct ContentView: View {
   private var welcomeView: some View {
     ScrollView(showsIndicators: false) {
       VStack(spacing: 22) {
-        HomeDeviceShowcase(bluetooth: bluetooth)
+        HomeDeviceShowcase(bluetooth: bluetooth, refreshToken: screenRefreshToken)
           .frame(height: horizontalSizeClass == .regular ? 330 : 252)
+
+        if editor.sourceImage != nil {
+          ResumeEditingCard(
+            editor: editor,
+            resume: { isEditing = true },
+            discard: editor.clearImage
+          )
+        }
 
         VStack(spacing: 12) {
           Button {
@@ -171,6 +201,16 @@ struct ContentView: View {
           .accessibilityHint("下载今天的竖屏壁纸并打开卡片预览")
         }
 
+        if !recents.items.isEmpty {
+          RecentSendsSection(
+            library: recents,
+            bluetooth: bluetooth,
+            sendingID: outgoing?.recentID,
+            resend: resend,
+            delete: recents.remove
+          )
+        }
+
         DeviceConnectionCallout(
           bluetooth: bluetooth,
           renameDevice: beginRenamingDevice,
@@ -186,6 +226,7 @@ struct ContentView: View {
       .padding(.bottom, 32)
       .frame(maxWidth: .infinity)
     }
+    .onAppear { recents.refresh() }
   }
 
   private var editorWorkspace: some View {
@@ -242,6 +283,13 @@ struct ContentView: View {
       Button(action: pasteImage) {
         Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
       }
+      Divider()
+      Button(role: .destructive) {
+        isEditing = false
+        editor.clearImage()
+      } label: {
+        Label("关闭当前图片", systemImage: "xmark.circle")
+      }
     } label: {
       Image(systemName: "photo.badge.plus")
     }
@@ -258,12 +306,50 @@ struct ContentView: View {
   private func clearErrors() {
     editor.errorMessage = nil
     bluetooth.errorMessage = nil
+    // 这次传输已经失败或被放弃，不该再记到下一次成功头上。
+    outgoing = nil
   }
 
   private func primaryAction() {
     guard let payload = editor.payload else { return }
+    beginSend(payload: payload, preview: editor.previewImage, recentID: nil)
+  }
+
+  /// 直接把当初发出的 payload 再发一次，画面与那次发送完全一致，也不必回到编辑器。
+  private func resend(_ item: RecentSendItem) {
+    guard !bluetooth.isBusy else { return }
+    guard let payload = RecentSendStore.payload(for: item.id) else {
+      recents.remove(item.id)
+      editor.errorMessage = "这条记录的发送内容已丢失，已从最近发送里移除。"
+      return
+    }
+    beginSend(
+      payload: payload,
+      preview: RecentSendStore.preview(for: item.id),
+      recentID: item.id
+    )
+  }
+
+  private func beginSend(payload: Data, preview: UIImage?, recentID: UUID?) {
+    outgoing = OutgoingSend(payload: payload, preview: preview, recentID: recentID)
     if bluetooth.sendToCurrentDevice(payload) { return }
     presentDevicePicker(for: .connectAndSend)
+  }
+
+  private func completeSend() {
+    screenRefreshToken += 1
+    guard let sent = outgoing else {
+      // 分享扩展或快捷指令发起的传输由它们各自写入记录，这里只把主页刷新一次。
+      recents.refresh()
+      return
+    }
+    outgoing = nil
+    if let preview = sent.preview { DeviceScreenSnapshot.save(preview) }
+    if let recentID = sent.recentID {
+      recents.touch(recentID)
+    } else if let preview = sent.preview {
+      recents.record(preview: preview, payload: sent.payload)
+    }
   }
 
   private func presentDevicePicker(for purpose: DevicePickerPurpose) {
@@ -284,7 +370,7 @@ struct ContentView: View {
       guard let data = try await item.loadTransferable(type: Data.self) else {
         throw CocoaError(.fileReadCorruptFile)
       }
-      editor.loadImage(data: data)
+      if editor.loadImage(data: data) { isEditing = true }
       selectedPhoto = nil
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
@@ -303,7 +389,7 @@ struct ContentView: View {
       let data = try await Task.detached(priority: .userInitiated) {
         try Data(contentsOf: url)
       }.value
-      editor.loadImage(data: data)
+      if editor.loadImage(data: data) { isEditing = true }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "读取文件失败：\(error.localizedDescription)"
@@ -315,7 +401,7 @@ struct ContentView: View {
       editor.errorMessage = "剪贴板里没有可用的图片。"
       return
     }
-    editor.loadImage(data: data)
+    if editor.loadImage(data: data) { isEditing = true }
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 
@@ -330,7 +416,7 @@ struct ContentView: View {
     defer { isImporting = false }
     do {
       let wallpaper = try await BingDailyWallpaperClient.fetchToday()
-      editor.loadImage(data: wallpaper.data)
+      if editor.loadImage(data: wallpaper.data) { isEditing = true }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
     } catch {
       editor.errorMessage = "获取 Bing 每日壁纸失败：\(error.localizedDescription)"
@@ -368,6 +454,8 @@ private struct ImportProgressOverlay: View {
 
 private struct HomeDeviceShowcase: View {
   @ObservedObject var bluetooth: TodooBluetoothManager
+  /// 在本页发送成功后自增，用来提示这里重新读一次画面快照。
+  let refreshToken: Int
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.scenePhase) private var scenePhase
   @StateObject private var tilt = DeviceTiltMotion()
@@ -440,6 +528,7 @@ private struct HomeDeviceShowcase: View {
       if phase == .active { screenImage = DeviceScreenSnapshot.load() }
       syncMotion(isForeground: phase == .active)
     }
+    .onChange(of: refreshToken) { _ in screenImage = DeviceScreenSnapshot.load() }
     .onChange(of: reduceMotion) { _ in syncMotion(isForeground: scenePhase == .active) }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
@@ -795,6 +884,185 @@ private struct ScreenArtwork: View {
   }
 }
 
+/// 关掉预览后主页上的回程入口：编辑器里的图片、构图和效果都还在。
+private struct ResumeEditingCard: View {
+  @ObservedObject var editor: EditorModel
+  let resume: () -> Void
+  let discard: () -> Void
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Button(action: resume) {
+        HStack(spacing: 12) {
+          thumbnail
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text("继续编辑")
+              .font(.subheadline.weight(.semibold))
+            Text(subtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+
+          Spacer(minLength: 4)
+
+          Image(systemName: "chevron.right")
+            .font(.caption.bold())
+            .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityHint("回到卡片预览，继续这次的构图")
+
+      Button(action: discard) {
+        Image(systemName: "trash")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 34, height: 34)
+          .background(AppTheme.controlFill, in: Circle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("放弃这次编辑")
+    }
+    .padding(14)
+    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+
+  @ViewBuilder
+  private var thumbnail: some View {
+    let width: CGFloat = 40
+    let height = width / CGFloat(CardDisplay.aspectRatio)
+
+    ZStack {
+      AppTheme.paper
+      if let image = editor.previewImage ?? editor.sourceImage {
+        Image(uiImage: image)
+          .resizable()
+          .interpolation(.medium)
+          .scaledToFill()
+      }
+    }
+    .frame(width: width, height: height)
+    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 7, style: .continuous)
+        .stroke(AppTheme.hairline, lineWidth: 0.5)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private var subtitle: String {
+    if editor.isProcessing { return "正在生成预览" }
+    let zoom = editor.zoom.formatted(.number.precision(.fractionLength(1)))
+    return "\(editor.algorithm.shortTitle) · \(zoom)× · 尚未发送"
+  }
+}
+
+/// 最近成功发送过的画面，轻点即可原样再发一次。
+private struct RecentSendsSection: View {
+  @ObservedObject var library: RecentSendLibrary
+  @ObservedObject var bluetooth: TodooBluetoothManager
+  let sendingID: UUID?
+  let resend: (RecentSendItem) -> Void
+  let delete: (UUID) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Label("最近发送", systemImage: "clock.arrow.circlepath")
+          .font(.subheadline.weight(.semibold))
+        Spacer()
+        Text("\(library.items.count) 张")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 10) {
+          ForEach(library.items) { item in
+            RecentSendTile(
+              item: item,
+              isSending: item.id == sendingID && bluetooth.isBusy,
+              progress: bluetooth.progress,
+              resend: { resend(item) },
+              delete: { delete(item.id) }
+            )
+          }
+        }
+        .padding(.vertical, 2)
+      }
+      .disabled(bluetooth.isBusy)
+
+      Text("轻点重新发送这张画面，长按可删除记录。")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .padding(14)
+    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+}
+
+private struct RecentSendTile: View {
+  let item: RecentSendItem
+  let isSending: Bool
+  let progress: Double
+  let resend: () -> Void
+  let delete: () -> Void
+
+  private static let width: CGFloat = 84
+
+  var body: some View {
+    let height = Self.width / CGFloat(CardDisplay.aspectRatio)
+
+    Button(action: resend) {
+      VStack(spacing: 6) {
+        ZStack {
+          Image(uiImage: item.thumbnail)
+            .resizable()
+            .interpolation(.medium)
+            .scaledToFill()
+
+          if isSending {
+            Color.black.opacity(0.45)
+            VStack(spacing: 4) {
+              ProgressView().controlSize(.small).tint(.white)
+              Text(progress, format: .percent.precision(.fractionLength(0)))
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.white)
+            }
+          }
+        }
+        .frame(width: Self.width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(AppTheme.hairline, lineWidth: 0.5)
+        }
+
+        Text(item.sentAt, format: .dateTime.month(.defaultDigits).day().hour().minute())
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+    }
+    .buttonStyle(.plain)
+    .contextMenu {
+      Button(action: resend) {
+        Label("重新发送", systemImage: "arrow.up.circle")
+      }
+      Button(role: .destructive, action: delete) {
+        Label("删除记录", systemImage: "trash")
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(
+      "\(item.sentAt.formatted(date: .abbreviated, time: .shortened)) 发送的画面"
+    )
+    .accessibilityHint(isSending ? "正在重新发送" : "轻点重新发送到卡片")
+  }
+}
+
 private struct PrivacyNote: View {
   var body: some View {
     Label("图片仅在本机处理", systemImage: "lock.fill")
@@ -814,7 +1082,7 @@ private struct DeviceConnectionCallout: View {
     HStack(spacing: 12) {
       ZStack {
         Circle().fill(statusColor.opacity(0.14))
-        if bluetooth.isConnecting {
+        if bluetooth.isConnecting || bluetooth.isBusy {
           ProgressView()
             .controlSize(.small)
             .tint(statusColor)
@@ -837,7 +1105,11 @@ private struct DeviceConnectionCallout: View {
       }
 
       Spacer()
-      if bluetooth.hasCurrentDevice {
+      if bluetooth.isSending {
+        Text(bluetooth.progress, format: .percent.precision(.fractionLength(0)))
+          .font(.subheadline.monospacedDigit().weight(.bold))
+          .foregroundStyle(AppTheme.accent)
+      } else if bluetooth.hasCurrentDevice {
         Menu {
           Button(action: renameDevice) {
             Label("重命名设备", systemImage: "pencil")
@@ -853,6 +1125,7 @@ private struct DeviceConnectionCallout: View {
             .frame(width: 34, height: 34)
             .background(AppTheme.controlFill, in: Circle())
         }
+        .disabled(bluetooth.isBusy)
         .accessibilityLabel("设备连接选项")
       } else {
         Button("连接", action: changeDevice)
@@ -864,12 +1137,14 @@ private struct DeviceConnectionCallout: View {
   }
 
   private var statusColor: Color {
+    if bluetooth.isBusy { return AppTheme.accent }
     if bluetooth.isConnected { return AppTheme.success }
     if bluetooth.isConnecting { return AppTheme.accent }
     return .secondary
   }
 
   private var statusTitle: String {
+    if bluetooth.isBusy { return bluetooth.statusText }
     if bluetooth.hasCurrentDevice {
       return bluetooth.connectedDeviceName ?? "TodooCard"
     }
@@ -877,6 +1152,10 @@ private struct DeviceConnectionCallout: View {
   }
 
   private var statusSubtitle: String {
+    // 从最近发送里重发时，进度只会出现在主页上，这里要说清楚正在发生什么。
+    if bluetooth.isBusy {
+      return bluetooth.isSending ? "请保持卡片靠近 iPhone" : "正在建立安全连接"
+    }
     if bluetooth.isConnecting { return bluetooth.statusText }
     if bluetooth.isConnected {
       return bluetooth.batteryLevel.map { "已安全连接 · 电量 \($0)%" } ?? "已安全连接"

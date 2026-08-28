@@ -93,6 +93,7 @@ final class ShareViewController: UIViewController {
                 self.statusLabel.text = "正在连接上次使用的设备…"
                 try await bluetooth.sendAutomaticallyAndWait(processed.payload)
                 DeviceScreenSnapshot.save(processed.preview)
+                RecentSendStore.record(preview: processed.preview, payload: processed.payload)
                 self.finishSuccessfully()
             } catch is CancellationError {
                 return

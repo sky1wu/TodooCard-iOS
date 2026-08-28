@@ -31,7 +31,9 @@
 		A10000000000000000000007 /* Dithering.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* Dithering.swift */; };
 		A10000000000000000000008 /* PayloadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* PayloadBuilder.swift */; };
 		A10000000000000000000009 /* TransferProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* TransferProtocol.swift */; };
+		A00000000000000000000010 /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
 		A1000000000000000000000B /* DeviceScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* DeviceScreenSnapshot.swift */; };
+		A1000000000000000000000C /* RecentSendStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* RecentSendStore.swift */; };
 		A1000000000000000000000A /* TodooCardShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* TodooCardShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -78,6 +80,7 @@
 		B00000000000000000000010 /* AutomaticImageProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticImageProcessor.swift; sourceTree = "<group>"; };
 		B00000000000000000000011 /* TodooCard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCard.entitlements; sourceTree = "<group>"; };
 		B00000000000000000000012 /* DeviceScreenSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScreenSnapshot.swift; sourceTree = "<group>"; };
+		B00000000000000000000013 /* RecentSendStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSendStore.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000003 /* TodooCardShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodooCardShareExtension.entitlements; sourceTree = "<group>"; };
@@ -122,6 +125,7 @@
 				B00000000000000000000005 /* TodooBluetoothManager.swift */,
 				B00000000000000000000010 /* AutomaticImageProcessor.swift */,
 				B00000000000000000000012 /* DeviceScreenSnapshot.swift */,
+				B00000000000000000000013 /* RecentSendStore.swift */,
 				B0000000000000000000000E /* Shortcuts.swift */,
 				B0000000000000000000000F /* BingDailyWallpaper.swift */,
 				B0000000000000000000000D /* Assets.xcassets */,
@@ -279,6 +283,7 @@
 				A00000000000000000000005 /* TodooBluetoothManager.swift in Sources */,
 				A0000000000000000000000E /* AutomaticImageProcessor.swift in Sources */,
 				A0000000000000000000000F /* DeviceScreenSnapshot.swift in Sources */,
+				A00000000000000000000010 /* RecentSendStore.swift in Sources */,
 				A00000000000000000000006 /* CardConstants.swift in Sources */,
 				A00000000000000000000007 /* CoverLayout.swift in Sources */,
 				A00000000000000000000008 /* Dithering.swift in Sources */,
@@ -296,6 +301,7 @@
 				A10000000000000000000001 /* ShareViewController.swift in Sources */,
 				A10000000000000000000002 /* AutomaticImageProcessor.swift in Sources */,
 				A1000000000000000000000B /* DeviceScreenSnapshot.swift in Sources */,
+				A1000000000000000000000C /* RecentSendStore.swift in Sources */,
 				A10000000000000000000003 /* ImageProcessor.swift in Sources */,
 				A10000000000000000000004 /* TodooBluetoothManager.swift in Sources */,
 				A10000000000000000000005 /* CardConstants.swift in Sources */,
