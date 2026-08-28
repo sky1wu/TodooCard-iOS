@@ -1,0 +1,42 @@
+{
+  "name": "TodooCard Nightly",
+  "identifier": "com.todoocard.sender.nightly",
+  "subtitle": "TodooCard 墨水屏卡片的自动构建源",
+  "description": "main 分支每次通过 CI 后自动发布的未签名构建，由 SideStore 使用你自己的 Apple Account 重新签名安装。",
+  "iconURL": "https://raw.githubusercontent.com/sky1wu/TodooCard-iOS/main/TodooCardApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+  "website": "https://github.com/sky1wu/TodooCard-iOS",
+  "tintColor": "#3B6152",
+  "apps": [
+    {
+      "name": "TodooCard",
+      "bundleIdentifier": "com.todoocard.sender",
+      "developerName": "Sky1Wu",
+      "subtitle": "把图片处理并发送到 TodooCard 墨水屏",
+      "localizedDescription": "在 iPhone 上完成裁切、抖动与六色量化，再通过蓝牙把图片发送到 TodooCard / T3 墨水屏卡片。支持 Bing 每日壁纸、快捷指令自动化与系统分享扩展，所有图片处理都在本机完成。",
+      "iconURL": "https://raw.githubusercontent.com/sky1wu/TodooCard-iOS/main/TodooCardApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "0.0.0",
+          "buildVersion": "0",
+          "date": "1970-01-01T00:00:00Z",
+          "localizedDescription": "占位版本，实际内容由 CI 生成。",
+          "downloadURL": "https://github.com/sky1wu/TodooCard-iOS/releases/download/nightly/TodooCard.ipa",
+          "size": 0,
+          "minOSVersion": "16.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.security.application-groups"
+        ],
+        "privacy": {
+          "NSBluetoothAlwaysUsageDescription": "用于连接 TodooCard 并发送在本机处理好的图片。",
+          "NSPhotoLibraryUsageDescription": "用于选择要显示在 TodooCard 上的图片。",
+          "NSMotionUsageDescription": "用于在首页读取设备姿态，让卡片预览随手机倾斜产生光影变化。"
+        }
+      }
+    }
+  ],
+  "news": []
+}

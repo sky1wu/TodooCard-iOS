@@ -8,11 +8,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  NIGHTLY_TAG: nightly
 
 jobs:
   build:
@@ -43,11 +46,14 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/TodooCardDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             build
 
       - name: Package unsigned IPA
         run: |
+          set -euo pipefail
           APP_PATH="$RUNNER_TEMP/TodooCardDerivedData/Build/Products/Release-iphoneos/TodooCard.app"
+          EXTENSION_PATH="$APP_PATH/PlugIns/TodooCardShareExtension.appex"
           IPA_ROOT="$RUNNER_TEMP/TodooCardIPA"
           test -d "$APP_PATH"
           test -x "$APP_PATH/TodooCard"
@@ -60,6 +66,19 @@ jobs:
           unzip -tq "$RUNNER_TEMP/TodooCard.ipa"
           unzip -Z1 "$RUNNER_TEMP/TodooCard.ipa" | grep -q '^Payload/TodooCard.app/Info.plist$'
           file "$APP_PATH/TodooCard"
+
+          # SideStore 靠 buildVersion 判断更新，主 App 与分享扩展必须写进同一个版本号。
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")
+          EXTENSION_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$EXTENSION_PATH/Info.plist")
+          test "$APP_BUILD" = "${{ github.run_number }}"
+          test "$EXTENSION_BUILD" = "$APP_BUILD"
+
+          {
+            echo "APP_VERSION=$APP_VERSION"
+            echo "APP_BUILD=$APP_BUILD"
+            echo "IPA_SIZE=$(stat -f%z "$RUNNER_TEMP/TodooCard.ipa")"
+          } >> "$GITHUB_ENV"
           shasum -a 256 "$RUNNER_TEMP/TodooCard.ipa"
 
       - name: Upload IPA
@@ -69,3 +88,53 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 14
+
+      - name: Generate SideStore source
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        env:
+          # 查询参数只为绕开固定文件名可能带来的缓存，GitHub 会忽略它。
+          DOWNLOAD_URL: "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.NIGHTLY_TAG }}/TodooCard.ipa?v=${{ github.run_number }}"
+          SOURCE_OUTPUT: ${{ runner.temp }}/source.json
+        run: |
+          set -euo pipefail
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          RELEASE_NOTES="构建 #${{ github.run_number }} · $(git log -1 --pretty=%s)"
+          export BUILD_DATE RELEASE_NOTES
+          python3 distribution/make_source.py
+          python3 -m json.tool "$SOURCE_OUTPUT" > /dev/null
+
+          {
+            echo "TodooCard nightly 自动构建，未签名，交给 SideStore 用你自己的 Apple Account 重新签名。"
+            echo
+            echo "- 版本：${APP_VERSION} (${APP_BUILD})"
+            echo "- 提交：${{ github.sha }}"
+            echo "- 说明：${RELEASE_NOTES}"
+            echo
+            echo "SideStore 源地址：${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.NIGHTLY_TAG }}/source.json"
+          } > "$RUNNER_TEMP/nightly-notes.md"
+
+      - name: Publish nightly release
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git tag -f "$NIGHTLY_TAG" "${{ github.sha }}"
+          git push -f origin "refs/tags/$NIGHTLY_TAG"
+
+          if gh release view "$NIGHTLY_TAG" > /dev/null 2>&1; then
+            gh release edit "$NIGHTLY_TAG" \
+              --title "Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" \
+              --prerelease
+          else
+            gh release create "$NIGHTLY_TAG" \
+              --title "Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" \
+              --prerelease
+          fi
+
+          gh release upload "$NIGHTLY_TAG" \
+            "$RUNNER_TEMP/TodooCard.ipa" \
+            "$RUNNER_TEMP/source.json" \
+            --clobber

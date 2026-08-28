@@ -126,6 +126,31 @@ iPhoneOS 为目标执行无签名的 Release `xcodebuild`，并按标准
 IPA 本身未签名，可交给 SideStore 使用 Apple Account 重新签名并安装。真机 BLE
 交互仍需使用实体 TodooCard/T3 人工验收。
 
+## 自动分发（SideStore）
+
+`main` 的每次成功构建都会覆盖固定的 `nightly` release，其中包含两个资产：
+
+- `TodooCard.ipa`：本次构建的未签名安装包
+- `source.json`：SideStore 源，`versions[0]` 始终指向这个 IPA
+
+在 SideStore 里添加下面这个源，之后每次推送 `main` 都能直接在 SideStore 中更新：
+
+```text
+https://github.com/sky1wu/TodooCard-iOS/releases/download/nightly/source.json
+```
+
+版本号规则：`CFBundleShortVersionString` 取工程里的 `MARKETING_VERSION`，
+`CFBundleVersion` 由 CI 用 `CURRENT_PROJECT_VERSION=${{ github.run_number }}` 注入，
+主 App 与分享扩展写入同一个值（工作流里有断言校验），SideStore 依据 `buildVersion`
+判断是否有新构建。因此 `build.yml` 的文件名不要重命名——`run_number` 会归零，
+导致版本号倒退后不再提示更新。
+
+源文件由 `distribution/source.template.json` 加 `distribution/make_source.py` 生成，
+描述文案、图标、权限说明改模板即可；版本、时间、体积一律由 CI 从实际产物读取。
+
+注意：SideStore 用免费 Apple Account 重签名时无法保留 App Group 权限，此时主 App 与
+分享扩展不再共享"当前设备"记忆（代码会回退到各自的 `UserDefaults`），其余功能不受影响。
+
 ## 目录
 
 ```text
@@ -133,6 +158,7 @@ TodooCard.xcodeproj/       可直接打开的 iOS 工程
 TodooCardApp/              SwiftUI、图片渲染和 CoreBluetooth 传输
 Sources/TodooCore/         无 UI 依赖的协议、量化与 Payload 核心
 Sources/TodooCoreChecks/   固定向量和协议校验程序
+distribution/              SideStore 源模板与生成脚本
 Package.swift              核心库的 Swift Package 入口
 ```
 
