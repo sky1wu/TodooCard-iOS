@@ -151,8 +151,28 @@ https://github.com/sky1wu/TodooCard-iOS/releases/download/nightly/source.json
 源文件由 `distribution/source.template.json` 加 `distribution/make_source.py` 生成，
 描述文案、图标、权限说明改模板即可；版本、时间、体积一律由 CI 从实际产物读取。
 
-注意：SideStore 用免费 Apple Account 重签名时无法保留 App Group 权限，此时主 App 与
-分享扩展不再共享"当前设备"记忆（代码会回退到各自的 `UserDefaults`），其余功能不受影响。
+### 免费 Apple Account 的限制
+
+SideStore 安装时会弹出「App Contains Extensions」，要选 **Keep App Extensions
+(Register App ID for Each Extension)**，让分享扩展拿到属于自己的 App ID。主 App 与扩展
+各占一个，免费账号每周最多创建 10 个 App ID，注册过的可以复用，后续更新不再消耗额度。
+选另外两项都不行：`Remove` 会把扩展剥掉；`Use Main Profile` 用主 App 的描述文件给扩展
+签名，App ID 与 bundle ID 对不上，iOS 不会启动它。
+
+即便选对了，**免费账号下分享扩展依然不可用**。扩展申请了 App Group 权限，而免费账号
+创建不了 App Group，描述文件里没有这项权限、二进制却申请了它，iOS 会直接拒绝启动——
+表现为分享面板里点了毫无反应，且不产生崩溃日志。退一步说，就算它能启动，也读不到存在
+App Group 里的「上次使用的设备」，照样发不出去。用付费开发者账号签名则一切正常。
+
+免费账号下要从系统分享发图，用快捷指令代替扩展：
+
+1. 快捷指令 App 新建一个快捷指令，在详情里打开「在共享表单中显示」，接受类型只勾选图像
+2. 添加「自动更新 TodooCard」动作，把「图片」参数设为「快捷指令输入」
+
+它跑在主 App 进程里，能读到当前设备，首页画面也会跟着更新，内存上限比扩展宽得多。
+
+同样因为拿不到 App Group，主 App 与分享扩展不共享「当前设备」记忆和首页画面快照，
+代码会各自回退到自己的 `UserDefaults` 与沙盒，不会报错。
 
 ## 目录
 
