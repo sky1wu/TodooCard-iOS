@@ -1260,38 +1260,42 @@ private struct DeviceMatteTexture: View {
 
   var body: some View {
     Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: false) { context, size in
-      let spacing = max(3, size.width / 38)
-      let grain = max(0.45, size.width / 420)
-      let columns = max(1, Int(ceil(size.width / spacing)))
-      let rows = max(1, Int(ceil(size.height / spacing)))
-
-      for row in 0 ... rows {
-        for column in 0 ... columns {
-          let seed = (row * 73_856_093) ^ (column * 19_349_663)
-          let jitterX = CGFloat(seed % 101) / 100 - 0.5
-          let jitterY = CGFloat((seed / 101) % 103) / 102 - 0.5
-          let diameter = grain * (0.72 + CGFloat((seed / 10_403) % 7) * 0.06)
-          let origin = CGPoint(
-            x: CGFloat(column) * spacing + spacing / 2 + jitterX * spacing * 0.52,
-            y: CGFloat(row) * spacing + spacing / 2 + jitterY * spacing * 0.52
-          )
-          let rect = CGRect(
-            x: origin.x - diameter / 2,
-            y: origin.y - diameter / 2,
-            width: diameter,
-            height: diameter
-          )
-          let color = seed.isMultiple(of: 3)
-            ? Color.white.opacity(0.085)
-            : Color.black.opacity(0.045)
-          context.fill(Path(ellipseIn: rect), with: .color(color))
-        }
-      }
+      Self.drawTexture(in: &context, size: size)
     }
     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     .blendMode(.softLight)
     .opacity(0.78)
     .allowsHitTesting(false)
+  }
+
+  private static func drawTexture(in context: inout GraphicsContext, size: CGSize) {
+    let spacing: CGFloat = max(3, size.width / 38)
+    let grain: CGFloat = max(0.45, size.width / 420)
+    let columns = max(1, Int(ceil(size.width / spacing)))
+    let rows = max(1, Int(ceil(size.height / spacing)))
+
+    for row in 0 ... rows {
+      for column in 0 ... columns {
+        let seed = (row * 73_856_093) ^ (column * 19_349_663)
+        let jitterX = CGFloat(seed % 101) / 100 - 0.5
+        let jitterY = CGFloat((seed / 101) % 103) / 102 - 0.5
+        let diameter = grain * (0.72 + CGFloat((seed / 10_403) % 7) * 0.06)
+        let origin = CGPoint(
+          x: CGFloat(column) * spacing + spacing / 2 + jitterX * spacing * 0.52,
+          y: CGFloat(row) * spacing + spacing / 2 + jitterY * spacing * 0.52
+        )
+        let rect = CGRect(
+          x: origin.x - diameter / 2,
+          y: origin.y - diameter / 2,
+          width: diameter,
+          height: diameter
+        )
+        let color = seed.isMultiple(of: 3)
+          ? Color.white.opacity(0.085)
+          : Color.black.opacity(0.045)
+        context.fill(Path(ellipseIn: rect), with: .color(color))
+      }
+    }
   }
 }
 
