@@ -139,11 +139,14 @@ IPA 本身未签名，可交给 SideStore 使用 Apple Account 重新签名并�
 https://github.com/sky1wu/TodooCard-iOS/releases/download/nightly/source.json
 ```
 
-版本号规则：`CFBundleShortVersionString` 取工程里的 `MARKETING_VERSION`，
-`CFBundleVersion` 由 CI 用 `CURRENT_PROJECT_VERSION=${{ github.run_number }}` 注入，
-主 App 与分享扩展写入同一个值（工作流里有断言校验），SideStore 依据 `buildVersion`
-判断是否有新构建。因此 `build.yml` 的文件名不要重命名——`run_number` 会归零，
-导致版本号倒退后不再提示更新。
+版本号规则：SideStore 判断有没有更新只比较 `CFBundleShortVersionString`，`buildVersion`
+变化它不认，所以 CI 会把工程里的 `MARKETING_VERSION`（如 `1.3.0`）的补丁位换成
+`run_number` 发布，例如 `1.3.24`；`CFBundleVersion` 同样是 `run_number`。主 App 与分享
+扩展写入同一组版本号，工作流里有断言校验，注入失效会直接让构建失败。
+
+因此 `build.yml` 的文件名不要重命名——`run_number` 会归零，版本号倒退后 SideStore
+就不再提示更新。把工程的 `MARKETING_VERSION` 升到 `1.4.0` 之后，nightly 会继续以
+`1.4.<run_number>` 递增，不影响顺序。
 
 源文件由 `distribution/source.template.json` 加 `distribution/make_source.py` 生成，
 描述文案、图标、权限说明改模板即可；版本、时间、体积一律由 CI 从实际产物读取。

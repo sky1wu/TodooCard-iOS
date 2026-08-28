@@ -35,6 +35,18 @@ jobs:
       - name: Run protocol and payload checks
         run: swift run --jobs 4 TodooCoreChecks
 
+      - name: Resolve nightly version
+        run: |
+          set -euo pipefail
+          # SideStore 判断更新只比 CFBundleShortVersionString，buildVersion 变了它不认，
+          # 所以 nightly 的补丁位直接用 run_number，保证版本号本身单调递增。
+          BASE_VERSION=$(sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' TodooCard.xcodeproj/project.pbxproj | sort -u)
+          test "$(printf '%s\n' "$BASE_VERSION" | wc -l | tr -d ' ')" = "1"
+          printf '%s' "$BASE_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          NIGHTLY_VERSION="${BASE_VERSION%.*}.${{ github.run_number }}"
+          echo "NIGHTLY_VERSION=$NIGHTLY_VERSION" >> "$GITHUB_ENV"
+          echo "工程版本 $BASE_VERSION → 本次发布 $NIGHTLY_VERSION (${{ github.run_number }})"
+
       - name: Build iOS app
         run: |
           set -o pipefail
@@ -46,6 +58,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/TodooCardDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            MARKETING_VERSION="$NIGHTLY_VERSION" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             build
 
@@ -71,6 +84,7 @@ jobs:
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")
           EXTENSION_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$EXTENSION_PATH/Info.plist")
+          test "$APP_VERSION" = "$NIGHTLY_VERSION"
           test "$APP_BUILD" = "${{ github.run_number }}"
           test "$EXTENSION_BUILD" = "$APP_BUILD"
 
