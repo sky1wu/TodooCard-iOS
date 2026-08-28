@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于连接 TodooCard 并发送在本机处理好的图片。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>用于在首页读取设备姿态，让卡片预览随手机倾斜产生光影变化。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选择要显示在 TodooCard 上的图片。</string>
 	<key>TodooAppGroupIdentifier</key>
