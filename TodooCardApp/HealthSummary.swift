@@ -26,10 +26,11 @@ struct HealthSummarySnapshot: Sendable {
   }
 }
 
-/// 昨晚的主睡眠段。start / end 是这一段的实际入睡与起床时刻。
+/// 昨晚的主睡眠段。start / end 是这一段的实际入睡与起床时刻；数据由快捷指令传进来时
+/// 通常只有时长，没有具体时刻，卡片会略过那一行。
 struct SleepSummary: Sendable {
-  let start: Date
-  let end: Date
+  let start: Date?
+  let end: Date?
   let totals: SleepStageTotals
   let awakenings: Int
   let score: SleepScore
@@ -37,17 +38,36 @@ struct SleepSummary: Sendable {
 
 enum HealthSummaryError: LocalizedError {
   case unavailable
+  case missingEntitlement
   case authorizationFailed(String)
   case noData
+  case noShortcutInput
+
+  /// HealthKit 只在错误里给一句英文原文，这里把最常见的一种翻成能照着做的说明。
+  static func from(_ error: Error) -> HealthSummaryError {
+    let description = error.localizedDescription
+    if description.contains("com.apple.developer.healthkit")
+      || description.localizedCaseInsensitiveContains("entitlement")
+    {
+      return .missingEntitlement
+    }
+    return .authorizationFailed(description)
+  }
 
   var errorDescription: String? {
     switch self {
     case .unavailable:
       return "这台设备不支持「健康」数据。"
+    case .missingEntitlement:
+      return "这份安装包没有带上 HealthKit 权限，系统不允许它读取健康数据。用 Xcode 安装时，"
+        + "在 TodooCard target 的 Signing & Capabilities 里加上 HealthKit 再重装；用 SideStore "
+        + "重签名时，重签过程可能会剥掉这项权限。其他功能不受影响。"
     case .authorizationFailed(let message):
       return "无法读取「健康」数据：\(message)"
     case .noData:
       return "没有读到今天的健康数据。请在「设置 → 隐私与安全性 → 健康 → TodooCard」中允许读取活动、步数与睡眠。"
+    case .noShortcutInput:
+      return "快捷指令没有传入任何健康数据，请至少填写其中一项。"
     }
   }
 }
@@ -80,7 +100,7 @@ enum HealthSummaryReader {
     do {
       try await store.requestAuthorization(toShare: [], read: readTypes)
     } catch {
-      throw HealthSummaryError.authorizationFailed(error.localizedDescription)
+      throw HealthSummaryError.from(error)
     }
   }
 

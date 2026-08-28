@@ -233,6 +233,125 @@ struct SendHealthSummaryIntent: AppIntent {
   }
 }
 
+/// 免费 Apple Account 用 SideStore 重签名后拿不到 HealthKit 权限，App 自己读不了健康数据。
+/// 这个动作把取数交给「快捷指令」App——它自己有权限——这里只负责排版和发送，
+/// 全程不碰 HealthKit API，因此不需要那项权限。
+struct SendHealthSummaryFromShortcutIntent: AppIntent {
+  static let title: LocalizedStringResource = "发送健康摘要（数据由快捷指令提供）"
+  static let description = IntentDescription(
+    "用快捷指令「查找健康样本」取到的数值排版成健康摘要卡片并发送。适合无法授予 TodooCard 健康权限的安装方式；填几项就画几项。"
+  )
+  static let openAppWhenRun = false
+
+  @Parameter(title: "活动能量（千卡）", controlStyle: .field)
+  var moveKilocalories: Double?
+
+  @Parameter(title: "活动目标（千卡）", controlStyle: .field)
+  var moveGoal: Double?
+
+  @Parameter(title: "锻炼时间（分钟）", controlStyle: .field)
+  var exerciseMinutes: Double?
+
+  @Parameter(title: "锻炼目标（分钟）", controlStyle: .field)
+  var exerciseGoal: Double?
+
+  @Parameter(title: "站立小时数", description: "站立目标固定为 12 小时", controlStyle: .field)
+  var standHours: Double?
+
+  @Parameter(title: "步数", controlStyle: .field)
+  var steps: Double?
+
+  @Parameter(title: "静息心率（次/分）", controlStyle: .field)
+  var restingHeartRate: Double?
+
+  @Parameter(title: "睡眠时长（分钟）", controlStyle: .field)
+  var sleepMinutes: Double?
+
+  @Parameter(title: "清醒时长（分钟）", controlStyle: .field)
+  var awakeMinutes: Double?
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("把健康数据排版成卡片并发送") {
+      \.$moveKilocalories
+      \.$moveGoal
+      \.$exerciseMinutes
+      \.$exerciseGoal
+      \.$standHours
+      \.$steps
+      \.$restingHeartRate
+      \.$sleepMinutes
+      \.$awakeMinutes
+    }
+  }
+
+  func perform() async throws -> some IntentResult {
+    let snapshot = makeSnapshot()
+    guard snapshot.hasAnyData else { throw HealthSummaryError.noShortcutInput }
+    let cardData = try HealthCardRenderer.renderPNG(snapshot)
+    let configuration = AutomaticImageConfiguration(
+      rotation: 0,
+      focusX: 50,
+      focusY: 50,
+      zoom: 1,
+      algorithm: DitherAlgorithm.none,
+      strength: 1,
+      brightnessCompensation: 0
+    )
+    let processed = try await Task.detached(priority: .userInitiated) {
+      try AutomaticImageProcessor.process(cardData, configuration: configuration)
+    }.value
+
+    let bluetooth = await TodooBluetoothManager.shared
+    try await bluetooth.sendAutomaticallyAndWait(processed.payload)
+    DeviceScreenSnapshot.save(processed.preview)
+    RecentSendStore.record(
+      sourceData: cardData,
+      configuration: configuration,
+      preview: processed.preview,
+      payload: processed.payload
+    )
+    return .result()
+  }
+
+  private func makeSnapshot() -> HealthSummarySnapshot {
+    HealthSummarySnapshot(
+      generatedAt: Date(),
+      move: ring(moveKilocalories, goal: moveGoal),
+      exercise: ring(exerciseMinutes, goal: exerciseGoal),
+      // 站立目标在「健身记录」里固定为 12 小时，用户改不了，不必再占一个参数。
+      stand: ring(standHours, goal: 12),
+      usesMoveTime: false,
+      steps: steps,
+      distanceMeters: nil,
+      flights: nil,
+      restingHeartRate: restingHeartRate,
+      sleep: makeSleep()
+    )
+  }
+
+  private func ring(_ value: Double?, goal: Double?) -> ActivityRingMetric? {
+    guard let value else { return nil }
+    return ActivityRingMetric(value: value, goal: goal ?? 0)
+  }
+
+  /// 在快捷指令里把睡眠按阶段聚合几乎做不出来，所以只收总时长和清醒时长，
+  /// 评分自然走「没有分段」那条分支，卡片也会写明这一点。
+  private func makeSleep() -> SleepSummary? {
+    guard let sleepMinutes, sleepMinutes > 0 else { return nil }
+    let totals = SleepStageTotals(
+      unspecified: sleepMinutes * 60,
+      awake: max(0, awakeMinutes ?? 0) * 60
+    )
+    return SleepSummary(
+      start: nil,
+      end: nil,
+      totals: totals,
+      awakenings: 0,
+      score: SleepScoring.score(totals: totals, awakenings: 0)
+    )
+  }
+}
+
 struct TodooCardShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(

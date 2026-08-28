@@ -202,9 +202,11 @@ enum HealthCardRenderer {
       return
     }
 
-    let range = "\(timeFormatter.string(from: sleep.start)) → \(timeFormatter.string(from: sleep.end))"
-    let rangeText = text(range, font(13, .medium))
-    draw(rangeText, at: CGPoint(x: contentRight - rangeText.size().width, y: 398))
+    if let start = sleep.start, let end = sleep.end {
+      let range = "\(timeFormatter.string(from: start)) → \(timeFormatter.string(from: end))"
+      let rangeText = text(range, font(13, .medium))
+      draw(rangeText, at: CGPoint(x: contentRight - rangeText.size().width, y: 398))
+    }
 
     let score = composed([
       ("\(sleep.score.value)", font(46, .bold, rounded: true)),
@@ -219,9 +221,15 @@ enum HealthCardRenderer {
 
     let duration = text(formatSleepDuration(sleep.totals.asleep), font(28, .bold, rounded: true))
     draw(duration, at: CGPoint(x: contentRight - duration.size().width, y: 434))
-    let awake = sleep.totals.awake > 0
-      ? "清醒 \(formatCompactDuration(sleep.totals.awake)) · 醒来 \(sleep.awakenings) 次"
-      : "整夜连续"
+    // 醒来次数只有 HealthKit 分段才数得出来，快捷指令传进来的数据没有这一项。
+    let awake: String
+    if sleep.totals.awake <= 0 {
+      awake = "整夜连续"
+    } else if sleep.awakenings > 0 {
+      awake = "清醒 \(formatCompactDuration(sleep.totals.awake)) · 醒来 \(sleep.awakenings) 次"
+    } else {
+      awake = "清醒 \(formatCompactDuration(sleep.totals.awake))"
+    }
     let awakeText = text(awake, font(12, .medium))
     draw(awakeText, at: CGPoint(x: contentRight - awakeText.size().width, y: 486))
 
